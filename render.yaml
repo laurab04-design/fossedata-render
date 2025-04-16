@@ -1,11 +1,10 @@
 services:
   - type: cron
     name: fossedata-crawler
-    runtime: python
-    buildCommand: |
-      pip install -r requirements.txt
-      playwright install chromium
-    startCommand: python main.py
+    runtime: docker
+    repo: https://github.com/laurab04-design/fossedata-render
+    branch: main
+    dockerfilePath: Dockerfile
     schedule: "0 18 * * 5"  # Every Friday at 6pm
     envVars:
       - key: GOOGLE_MAPS_API_KEY
