@@ -182,9 +182,9 @@ def find_clashes_and_combos(results):
 
 if __name__ == "__main__":
     urls = fetch_aspx_links()
-if not urls:
-    print("No show URLs found.")
-    return
+    if not urls:
+        print("No show URLs found.")
+        return
     
     travel_cache = {}
     if os.path.exists(CACHE_FILE):
