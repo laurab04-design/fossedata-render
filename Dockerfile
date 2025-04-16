@@ -29,15 +29,11 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Create the directory and set permissions
-RUN mkdir -p /ms-playwright && chmod -R 777 /ms-playwright
-
-# Install Playwright browsers (Chromium only)
+# Install Playwright browsers (Chromium only) in the default path
 RUN playwright install --with-deps chromium
 
-# Debugging step: List installed browsers
-RUN ls -la /ms-playwright
-RUN ls -la /root/.cache/ms-playwright
+# Debugging step: List installed browsers in default path
+RUN ls -la /opt/render/.cache/ms-playwright/chromium*
 
 # Copy the rest of your code
 COPY . .
