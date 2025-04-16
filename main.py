@@ -7,6 +7,7 @@ import requests
 import pdfplumber
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
+import csv
 
 # === CONFIGURATION ===
 HOME_POSTCODE = os.environ.get("HOME_POSTCODE")
@@ -39,7 +40,6 @@ def download_schedule_playwright(show_url):
             page = browser.new_page()
             page.goto(show_url)
             page.wait_for_load_state("networkidle")
-
             with page.expect_download() as download_info:
                 page.click('input[type="submit"][value*="Schedule"]', timeout=5000)
                 download = download_info.value
@@ -105,21 +105,20 @@ def estimate_cost(distance_km, duration_s):
     return fuel + OVERNIGHT_COST if duration_s > OVERNIGHT_THRESHOLD_HOURS * 3600 else fuel
 
 def extract_judges(text):
-    sections = text.lower().split("golden")
+    sections = text.lower().split("retriever (golden)")
     result = {}
     for sec in sections[1:]:
-        if "retriever" in sec:
-            sub = sec[:1000]
-            dogs = re.search(r"dogs.*judge.*?:\s*([A-Z][a-z].+)", sub, re.I)
-            bitches = re.search(r"bitches.*judge.*?:\s*([A-Z][a-z].+)", sub, re.I)
-            all_in_one = re.search(r"judge.*?:\s*([A-Z][a-z].+)", sub, re.I)
-            if dogs:
-                result["dogs"] = dogs.group(1).strip()
-            if bitches:
-                result["bitches"] = bitches.group(1).strip()
-            if not result and all_in_one:
-                result["all"] = all_in_one.group(1).strip()
-            break
+        sub = sec[:1000]
+        dogs = re.search(r"dogs.*judge.*?:\s*([A-Z][a-z].+)", sub, re.I)
+        bitches = re.search(r"bitches.*judge.*?:\s*([A-Z][a-z].+)", sub, re.I)
+        all_in_one = re.search(r"judge.*?:\s*([A-Z][a-z].+)", sub, re.I)
+        if dogs:
+            result["dogs"] = dogs.group(1).strip()
+        if bitches:
+            result["bitches"] = bitches.group(1).strip()
+        if not result and all_in_one:
+            result["all"] = all_in_one.group(1).strip()
+        break
     return result or None
 
 def get_show_date(text):
@@ -201,7 +200,32 @@ if __name__ == "__main__":
 
     find_clashes_and_combos(shows)
 
+    # Output JSON
     with open("results.json", "w") as f:
         json.dump(shows, f, indent=2)
+
+    # Output CSV
+    with open("results.csv", "w", newline="") as csvfile:
+        writer = csv.writer(csvfile)
+        writer.writerow([
+            "Show", "Date", "Postcode", "Distance (km)", "Time (hr)",
+            "Estimated Cost", "JW Points", "Golden Judge(s)", "Clash", "Combos"
+        ])
+        for s in shows:
+            judge = s.get("judge", {})
+            judge_text = ", ".join(f"{k}: {v}" for k, v in judge.items()) if judge else ""
+            combos = "; ".join(s.get("combo_with", [])) if "combo_with" in s else ""
+            writer.writerow([
+                s["show"],
+                s["date"],
+                s["postcode"],
+                s.get("distance_km"),
+                s.get("duration_hr"),
+                s.get("cost_estimate"),
+                s["points"],
+                judge_text,
+                "Yes" if s.get("clash") else "",
+                combos
+            ])
 
     print(f"Processed {len(shows)} shows with Golden Retriever classes.")
