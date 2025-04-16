@@ -7,3 +7,4 @@ google-auth
 google-auth-oauthlib
 beautifulsoup4
 python-dateutil
+PyMuPDF
