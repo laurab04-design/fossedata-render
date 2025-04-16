@@ -1,39 +1,39 @@
+# Use official Python image
 FROM python:3.11-slim
-
-# Install dependencies
-RUN apt-get update && apt-get install -y \
-    curl \
-    wget \
-    unzip \
-    fonts-liberation \
-    libnss3 \
-    libatk1.0-0 \
-    libatk-bridge2.0-0 \
-    libxcomposite1 \
-    libxdamage1 \
-    libxrandr2 \
-    libgbm1 \
-    libasound2 \
-    libxshmfence1 \
-    libxss1 \
-    libgtk-3-0 \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN playwright install --with-deps chromium    
 
 # Set working directory
 WORKDIR /app
 
-# Install Python dependencies
+# Install system dependencies for Playwright
+RUN apt-get update && apt-get install -y \
+    wget \
+    gnupg \
+    ca-certificates \
+    fonts-liberation \
+    libasound2 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdbus-1-3 \
+    libgbm1 \
+    libnspr4 \
+    libnss3 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxrandr2 \
+    xdg-utils \
+    libgtk-3-0 \
+    libu2f-udev \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements and install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Playwright and Chromium
-RUN pip install playwright && playwright install chromium
+# Install Playwright browsers (Chromium only)
+RUN playwright install --with-deps chromium
 
-# Copy the rest of the app
+# Copy the rest of your code
 COPY . .
 
-# Run the main script
+# Set the default command to run your script
 CMD ["python", "main.py"]
