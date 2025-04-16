@@ -31,6 +31,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Install Playwright browsers (Chromium only)
 RUN playwright install --with-deps chromium
+RUN ls -la /root/.cache/ms-playwright
 
 # Copy the rest of your code
 COPY . .
