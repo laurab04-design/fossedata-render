@@ -1,7 +1,7 @@
 services:
   - type: cron
     name: fossedata-crawler
-    runtime: docker
+    env: docker
     repo: https://github.com/laurab04-design/fossedata-render
     branch: main
     dockerfilePath: Dockerfile
