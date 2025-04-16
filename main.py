@@ -32,6 +32,31 @@ import csv
 from pathlib import Path
 import os
 
+# === NEW ADDITION 1: Set Playwright environment variable ===
+# Ensures that Playwright uses the correct browser path.
+os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "0"
+
+# === NEW ADDITION 2: Verify Chromium installation path ===
+# Checks whether Chromium is installed in the expected location.
+chromium_path = Path("/opt/render/.cache/ms-playwright/chromium")
+if chromium_path.exists():
+    print("Chromium is installed and available.")
+else:
+    print("Error: Chromium is not installed. Please check your configuration.")
+
+# === NEW ADDITION 3: Ensure Chromium installation at runtime ===
+# Ensures Chromium can be installed if missing.
+try:
+    subprocess.run(["playwright", "install", "chromium"], check=True)
+    print("Chromium installed successfully.")
+except subprocess.CalledProcessError as e:
+    print(f"Failed to install Chromium: {e}")
+
+# === NEW ADDITION 4: Debug Chromium Executable ===
+# Checks if the specific Chromium executable exists and logs the result.
+chromium_executable_path = Path("/opt/render/.cache/ms-playwright/chromium_headless_shell-1161/chrome-linux/headless_shell")
+print("Chromium executable exists:", chromium_executable_path.exists())
+
 # Debugging: Check Chromium installation path
 playwright_path = Path("/opt/render/.cache/ms-playwright")
 print("Checking Playwright installation path...")
