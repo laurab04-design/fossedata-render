@@ -1,0 +1,14 @@
+services:
+  - type: cron
+    name: fossedata-crawler
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python main.py
+    schedule: "0 18 * * 5"  # Every Friday at 6pm
+    envVars:
+      - key: GOOGLE_MAPS_API_KEY
+        sync: false
+      - key: HOME_POSTCODE
+        sync: false
+      - key: DRIVE_FOLDER
+        sync: false
