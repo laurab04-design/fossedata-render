@@ -19,18 +19,30 @@ MPG = 40
 OVERNIGHT_THRESHOLD_HOURS = 3
 OVERNIGHT_COST = 100
 
+import requests
+from bs4 import BeautifulSoup
+import os
+
+# URL of the FosseData shows list
+BASE_URL = "https://www.fossedata.co.uk/shows.aspx"
+OUTPUT_FILE = "aspx_links.txt"
+
 def fetch_aspx_links():
-    base_url = "https://www.fossedata.co.uk/shows.aspx"
-    response = requests.get(base_url, timeout=15)
-    soup = BeautifulSoup(response.text, "html.parser")
-    links = []
-    for a in soup.select("a[href$='.aspx']"):
-        href = a.get("href")
-        if href and "shows/" in href.lower():
-            links.append(urljoin(base_url, href))
-    with open("aspx_links.txt", "w") as f:
-        f.write("\n".join(links))
-    return links
+    try:
+        response = requests.get(BASE_URL)
+        soup = BeautifulSoup(response.text, "html.parser")
+
+        links = []
+        for a in soup.select("a[href$='.aspx']"):
+            href = a.get("href")
+            if href and "/shows/" in href.lower():
+                full_url = "https://www.fossedata.co.uk" + href
+                links.append(full_url)
+
+        with open(OUTPUT_FILE, "w") as f:
+            f.write("\n".join(links))
+
+fetch_aspx_links()
 
 def download_schedule_playwright(show_url):
     from playwright.sync_api import sync_playwright
@@ -165,7 +177,10 @@ def find_clashes_and_combos(results):
                 b.setdefault("combo_with", []).append(a["show"])
 
 # === MAIN ===
+
 if __name__ == "__main__":
+    fetch_aspx_links("aspx_links.txt")
+    
     travel_cache = {}
     if os.path.exists(CACHE_FILE):
         with open(CACHE_FILE, "r") as f:
