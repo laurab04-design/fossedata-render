@@ -178,14 +178,16 @@ def find_clashes_and_combos(results):
                 a.setdefault("combo_with", []).append(b["show"])
                 b.setdefault("combo_with", []).append(a["show"])
 
+import sys
+
 # === MAIN ===
 
 if __name__ == "__main__":
     urls = fetch_aspx_links()
     if not urls:
         print("No show URLs found.")
-        return
-    
+        sys.exit()
+
     travel_cache = {}
     if os.path.exists(CACHE_FILE):
         with open(CACHE_FILE, "r") as f:
