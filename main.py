@@ -179,7 +179,10 @@ def find_clashes_and_combos(results):
 # === MAIN ===
 
 if __name__ == "__main__":
-    fetch_aspx_links()
+    urls = fetch_aspx_links()
+if not urls:
+    print("No show URLs found.")
+    return links
     
     travel_cache = {}
     if os.path.exists(CACHE_FILE):
