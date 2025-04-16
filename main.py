@@ -41,6 +41,8 @@ def fetch_aspx_links():
 
         with open(OUTPUT_FILE, "w") as f:
             f.write("\n".join(links))
+    except Exception as e:
+        print(f"Error fetching ASPX links: {e}")
 
 def download_schedule_playwright(show_url):
     from playwright.sync_api import sync_playwright
