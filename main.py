@@ -4,50 +4,39 @@ import requests
 import json
 import time
 import datetime
-import fitz  # PyMuPDF
 import pdfplumber
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
-from google.oauth2 import service_account
 
 # === CONFIGURATION ===
 HOME_POSTCODE = os.environ.get("HOME_POSTCODE")
 GOOGLE_MAPS_API_KEY = os.environ.get("GOOGLE_MAPS_API_KEY")
-DRIVE_FOLDER_NAME = "FosseData Automation"
-
-# === SETUP ===
-with open("fossedata_links.txt") as f:
-    show_urls = [line.strip() for line in f if line.strip()]
-
-# === LOAD CACHE ===
 CACHE_FILE = "travel_cache.json"
-if os.path.exists(CACHE_FILE):
-    with open(CACHE_FILE, "r") as f:
-        travel_cache = json.load(f)
-else:
-    travel_cache = {}
+DOG_DOB = datetime.datetime.strptime("2024-05-15", "%Y-%m-%d")
+DOG_NAME = "Delia"
+MPG = 40
+OVERNIGHT_THRESHOLD_HOURS = 3
+OVERNIGHT_COST = 100
 
-# === DRIVE SETUP ===
-SCOPES = ['https://www.googleapis.com/auth/drive.file']
-SERVICE_ACCOUNT_FILE = 'credentials.json'
-creds = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
-drive_service = build('drive', 'v3', credentials=creds)
+# === STEP 1: Get .aspx Show URLs ===
+def fetch_aspx_links():
+    base_url = "https://www.fossedata.co.uk/show-schedules.aspx"
+    response = requests.get(base_url, timeout=15)
+    soup = BeautifulSoup(response.text, "html.parser")
+    links = []
 
-def ensure_drive_folder(folder_name):
-    results = drive_service.files().list(q=f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder'",
-                                         spaces='drive', fields="files(id, name)").execute()
-    items = results.get('files', [])
-    if items:
-        return items[0]['id']
-    else:
-        folder_metadata = {'name': folder_name, 'mimeType': 'application/vnd.google-apps.folder'}
-        folder = drive_service.files().create(body=folder_metadata, fields='id').execute()
-        return folder.get('id')
+    for a in soup.select("a[href$='.aspx']"):
+        href = a.get("href")
+        if href and "shows/" in href.lower():
+            full_url = urljoin(base_url, href)
+            links.append(full_url)
 
-drive_folder_id = ensure_drive_folder(DRIVE_FOLDER_NAME)
+    with open("aspx_links.txt", "w") as f:
+        f.write("\n".join(links))
 
+    return links
+
+# === STEP 2: Download and Extract PDF ===
 def download_schedule(url):
     try:
         response = requests.get(url, timeout=10)
@@ -73,17 +62,18 @@ def extract_text_from_pdf(file_path):
         print(f"PDF text extraction failed: {e}")
         return ""
 
+# === STEP 3: Extract Info and Calculate Travel ===
 def get_postcode_from_text(text):
     match = re.search(r"\b([A-Z]{1,2}\d{1,2}[A-Z]?) ?\d[A-Z]{2}\b", text)
-    return match.group(1) if match else None
+    return match.group(0) if match else None
 
-def get_drive_time(from_postcode, to_postcode):
+def get_drive_time(from_postcode, to_postcode, travel_cache):
     cache_key = f"{from_postcode}_TO_{to_postcode}"
     if cache_key in travel_cache:
         return travel_cache[cache_key]
 
     try:
-        url = f"https://maps.googleapis.com/maps/api/distancematrix/json"
+        url = "https://maps.googleapis.com/maps/api/distancematrix/json"
         params = {
             "origins": from_postcode,
             "destinations": to_postcode,
@@ -92,12 +82,10 @@ def get_drive_time(from_postcode, to_postcode):
         }
         r = requests.get(url, params=params)
         data = r.json()
-        duration = data['rows'][0]['elements'][0]['duration']['value']  # seconds
-        distance_km = data['rows'][0]['elements'][0]['distance']['value'] / 1000  # in km
-        travel_cache[cache_key] = {
-            "seconds": duration,
-            "km": distance_km
-        }
+        element = data["rows"][0]["elements"][0]
+        duration = element["duration"]["value"]  # in seconds
+        distance_km = element["distance"]["value"] / 1000
+        travel_cache[cache_key] = {"duration": duration, "distance": distance_km}
         with open(CACHE_FILE, "w") as f:
             json.dump(travel_cache, f)
         return travel_cache[cache_key]
@@ -105,48 +93,7 @@ def get_drive_time(from_postcode, to_postcode):
         print(f"Travel time lookup failed: {e}")
         return None
 
-def upload_to_drive(local_path, folder_id):
-    file_metadata = {
-        "name": os.path.basename(local_path),
-        "parents": [folder_id]
-    }
-    media = MediaFileUpload(local_path, resumable=True)
-    file = drive_service.files().create(body=file_metadata, media_body=media, fields="id").execute()
-    return file.get("id")
-
-def get_schedule_metadata(text):
-    metadata = {}
-    metadata["judges"] = []
-    metadata["classes"] = []
-    for line in text.splitlines():
-        if "Retriever (Golden)" in line:
-            metadata["golden"] = True
-        if re.search(r"Judge[:\-]", line, re.IGNORECASE):
-            metadata["judges"].append(line.strip())
-        if any(word in line for word in ["Minor", "Junior", "Graduate", "Special Beginners", "Limit", "Open"]):
-            metadata["classes"].append(line.strip())
-        if "Entries Close" in line or "Entry Closes" in line:
-            date_match = re.search(r"(\d{1,2} \w+ 20\d\d)", line)
-            if date_match:
-                metadata["entries_close"] = date_match.group(1)
-    return metadata
-
-def jw_points_possible(text):
-    if "Open Show" in text:
-        return 1
-    if "Championship Show" in text:
-        return 9
-    return 0
-
-def estimate_cost(distance_km, travel_time_sec):
-    miles = distance_km * 0.621371
-    fuel_cost_per_litre = get_average_diesel_price()
-    gallons = miles / 40
-    diesel_cost = gallons * 4.54609 * fuel_cost_per_litre
-    accommodation_cost = 100 if travel_time_sec > 3 * 3600 else 0
-    return diesel_cost + accommodation_cost
-
-def get_average_diesel_price():
+def get_latest_diesel_price():
     try:
         r = requests.get("https://www.globalpetrolprices.com/diesel_prices/")
         soup = BeautifulSoup(r.text, "html.parser")
@@ -156,42 +103,58 @@ def get_average_diesel_price():
     except:
         return 1.60  # fallback
 
-results = []
-for url in show_urls:
-    schedule_filename = download_schedule(url)
-    if not schedule_filename:
-        continue
+def estimate_cost(distance_km, duration_sec):
+    miles = distance_km * 0.621371
+    diesel_price = get_latest_diesel_price()
+    gallons = miles / MPG
+    diesel_cost = gallons * 4.54609 * diesel_price
+    return diesel_cost + OVERNIGHT_COST if duration_sec > OVERNIGHT_THRESHOLD_HOURS * 3600 else diesel_cost
 
-    text = extract_text_from_pdf(schedule_filename)
-    if "Retriever (Golden)" not in text and "retriever (golden)" not in text.lower():
-        continue
+def jw_points_possible(text):
+    if "open show" in text.lower():
+        return 1
+    if "championship show" in text.lower():
+        return 9
+    return 0
 
-    metadata = get_schedule_metadata(text)
-    postcode = get_postcode_from_text(text)
-    if postcode:
-        travel = get_drive_time(HOME_POSTCODE, postcode)
+# === MAIN PROCESS ===
+def main():
+    if os.path.exists(CACHE_FILE):
+        with open(CACHE_FILE, "r") as f:
+            travel_cache = json.load(f)
     else:
-        travel = None
+        travel_cache = {}
 
-    jw_pts = jw_points_possible(text)
-    est_cost = estimate_cost(travel["km"], travel["seconds"]) if travel else "?"
-    file_id = upload_to_drive(schedule_filename, drive_folder_id)
+    show_urls = fetch_aspx_links()
+    results = []
 
-    results.append({
-        "show": url,
-        "file": schedule_filename,
-        "google_drive_id": file_id,
-        "postcode": postcode,
-        "travel_time_hr": round(travel["seconds"] / 3600, 2) if travel else None,
-        "distance_km": round(travel["km"], 1) if travel else None,
-        "estimated_cost": round(est_cost, 2) if isinstance(est_cost, float) else "?",
-        "points_possible": jw_pts,
-        "entries_close": metadata.get("entries_close"),
-        "classes": metadata["classes"],
-        "judges": metadata["judges"],
-    })
+    for url in show_urls:
+        filename = download_schedule(url)
+        if not filename:
+            continue
+        text = extract_text_from_pdf(filename)
+        if "retriever (golden)" not in text.lower():
+            continue
 
-with open("results.json", "w") as f:
-    json.dump(results, f, indent=2)
+        postcode = get_postcode_from_text(text)
+        travel = get_drive_time(HOME_POSTCODE, postcode, travel_cache) if postcode else None
+        points = jw_points_possible(text)
+        cost = estimate_cost(travel["distance"], travel["duration"]) if travel else None
 
-print(f"Completed. Saved {len(results)} filtered show entries.")
+        results.append({
+            "show": url,
+            "pdf": filename,
+            "postcode": postcode,
+            "travel_time_hr": round(travel["duration"]/3600, 2) if travel else "?",
+            "distance_km": round(travel["distance"], 1) if travel else "?",
+            "points_possible": points,
+            "estimated_cost": round(cost, 2) if cost else "?",
+        })
+
+    with open("results.json", "w") as f:
+        json.dump(results, f, indent=2)
+
+    print(f"Done! Processed {len(results)} Retriever (Golden) schedules.")
+
+if __name__ == "__main__":
+    main()
