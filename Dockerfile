@@ -32,14 +32,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Install Playwright browsers (Chromium only) in the default path
 RUN playwright install --with-deps chromium
 
-# Debugging step: List installed browsers in default path
-RUN ls -la /opt/render/.cache/ms-playwright/chromium*
+# Debugging step: List installed browsers in the default path
+RUN echo "Checking Playwright browser installation..." && ls -la /opt/render/.cache/ms-playwright
 
 # Copy the rest of your code
 COPY . .
 
 # Debugging step: List files in the application directory
-RUN ls -la /app
+RUN echo "Listing application directory files..." && ls -la /app
 
-# Set the default command to run your script
-CMD ["python", "main.py"]
+# Force Playwright browser installation at runtime in case it's missing
+CMD ["sh", "-c", "playwright install chromium && python main.py"]
