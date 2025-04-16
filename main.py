@@ -184,7 +184,7 @@ if __name__ == "__main__":
     urls = fetch_aspx_links()
 if not urls:
     print("No show URLs found.")
-    return links
+    return
     
     travel_cache = {}
     if os.path.exists(CACHE_FILE):
