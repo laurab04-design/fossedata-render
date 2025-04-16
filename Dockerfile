@@ -29,6 +29,8 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
 # Install Playwright browsers (Chromium only)
 RUN playwright install --with-deps chromium
 RUN ls -la /root/.cache/ms-playwright
