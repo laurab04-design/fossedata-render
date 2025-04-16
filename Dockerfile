@@ -29,15 +29,23 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# Set environment variable for Playwright
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
+# Create the directory and set permissions
+RUN mkdir -p /ms-playwright && chmod -R 777 /ms-playwright
+
 # Install Playwright browsers (Chromium only)
-RUN playwright install --with-deps chromium
+RUN PLAYWRIGHT_BROWSERS_PATH=/ms-playwright playwright install --with-deps chromium
+
+# Debugging step: List installed browsers
+RUN ls -la /ms-playwright
 RUN ls -la /root/.cache/ms-playwright
 
 # Copy the rest of your code
 COPY . .
 
+# Debugging step: List files in the application directory
 RUN ls -la /app
 
 # Set the default command to run your script
