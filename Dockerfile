@@ -33,7 +33,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN mkdir -p /ms-playwright && chmod -R 777 /ms-playwright
 
 # Install Playwright browsers (Chromium only)
-RUN PLAYWRIGHT_BROWSERS_PATH=/ms-playwright playwright install --with-deps chromium
+RUN playwright install --with-deps chromium
 
 # Debugging step: List installed browsers
 RUN ls -la /ms-playwright
