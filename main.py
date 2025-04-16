@@ -1,3 +1,23 @@
+from pathlib import Path
+
+# Debugging: Check if the Chromium executable exists
+chromium_path = Path("/opt/render/.cache/ms-playwright/chromium_headless_shell-1161/chrome-linux/headless_shell")
+print("Chromium exists:", chromium_path.exists())
+
+# Rest of your application logic
+from playwright.sync_api import sync_playwright
+
+def main():
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        page.goto("https://www.fossedata.co.uk/shows/Shows-To-Enter.aspx")
+        print(page.title())
+        browser.close()
+
+if __name__ == "__main__":
+    main()
+
 import os
 import re
 import json
