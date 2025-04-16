@@ -38,5 +38,7 @@ RUN ls -la /root/.cache/ms-playwright
 # Copy the rest of your code
 COPY . .
 
+RUN 1s -1a /app
+
 # Set the default command to run your script
 CMD ["python", "main.py"]
