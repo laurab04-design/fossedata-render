@@ -32,6 +32,8 @@ ENV PLAYWRIGHT_BROWSERS_PATH=0
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+RUN pip install -r requirements.txt && playwright install chromium
+
 # Install Playwright browsers (Chromium only) in the default path
 RUN playwright install --with-deps chromium
 
