@@ -2,6 +2,7 @@ import os
 import re
 import csv
 import json
+import time
 import datetime
 import base64
 import requests
@@ -57,6 +58,7 @@ def extract_text_from_pdf(file_path):
         return ""
 
 # Utility functions
+
 def get_postcode(text):
     match = re.search(r"\b([A-Z]{1,2}\d{1,2}[A-Z]?) ?\d[A-Z]{2}\b", text)
     return match.group(0) if match else None
@@ -66,12 +68,10 @@ def get_drive(from_pc, to_pc, cache):
     if key in cache:
         return cache[key]
     try:
-        r = requests.get("https://maps.googleapis.com/maps/api/distancematrix/json", params={
-            "origins": from_pc,
-            "destinations": to_pc,
-            "mode": "driving",
-            "key": GOOGLE_MAPS_API_KEY
-        })
+        r = requests.get(
+            "https://maps.googleapis.com/maps/api/distancematrix/json",
+            params={"origins": from_pc, "destinations": to_pc, "mode": "driving", "key": GOOGLE_MAPS_API_KEY}
+        )
         e = r.json()["rows"][0]["elements"][0]
         result = {"duration": e["duration"]["value"], "distance": e["distance"]["value"] / 1000}
         cache[key] = result
@@ -86,7 +86,7 @@ def get_diesel_price():
     try:
         soup = BeautifulSoup(requests.get("https://www.globalpetrolprices.com/diesel_prices/").text, "html.parser")
         uk_row = soup.find("td", string=re.compile("United Kingdom")).find_parent("tr")
-        return float(uk_row.find_all("td")[2].text.strip().replace("\u00a3", ""))
+        return float(uk_row.find_all("td")[2].text.strip().replace("£", ""))
     except:
         return 1.60
 
@@ -163,66 +163,35 @@ def should_include_class(name):
         return True
     return False
 
-# PDF scraping with diagnostics
+# PDF scraping using postback trigger
 async def download_schedule_playwright(show_url):
     try:
         print(f"[INFO] Launching Playwright for: {show_url}")
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
-            context = await browser.new_context()
-            page = await context.new_page()
-
-            def on_request_failed(request):
-                try:
-                    print(f"[REQUEST FAILED] {request.url} -> {request.failure}")
-                except Exception as e:
-                    print(f"[REQUEST FAILED] {request.url} -> error inspecting failure: {e}")
-            page.on("console", lambda msg: print("[PAGE LOG]", msg.text()))
-            page.on("requestfailed", on_request_failed)
-
+            page = await browser.new_page()
             await page.goto(show_url, wait_until="networkidle")
-            await load_storage_state(context)
+            await load_storage_state(page.context)
             await page.evaluate("""
                 const b = document.getElementById('cookiescript_injected_wrapper');
                 if (b) b.remove();
             """)
-
-            try:
-                async with page.expect_download() as download_info:
-                    await page.click("#ctl00_ContentPlaceHolder_btnDownloadSchedule", timeout=30000)
-                download = await download_info.value
-                filename = download.suggested_filename
-                await download.save_as(filename)
+            await page.evaluate("__doPostBack('ctl00$ContentPlaceHolder$btnDownloadSchedule','')")
+            await page.wait_for_timeout(3000)
+            responses = await page.context.storage_state()
+            pdf_url = page.url
+            if pdf_url.endswith(".pdf"):
+                pdf_bytes = await page.content()
+                filename = show_url.rsplit("/",1)[-1].replace(".aspx", ".pdf")
+                with open(filename, "w", encoding="utf-8") as f:
+                    f.write(pdf_bytes)
                 await save_storage_state(page)
                 await browser.close()
-                print(f"[INFO] Downloaded and saved: {filename}")
+                print(f"[INFO] Schedule PDF retrieved via postback: {filename}")
                 return filename
-            except Exception:
-                print("[WARN] Playwright download didn’t fire — falling back to HTTP POST…")
-                form_data = await page.evaluate("""
-                    () => {
-                        const data = {};
-                        for (const [k,v] of new FormData(document.querySelector('form#aspnetForm'))) {
-                            data[k] = v;
-                        }
-                        return data;
-                    }
-                """)
-                response = await page.context.request.post(show_url, data=form_data)
-                ct = response.headers.get("content-type", "")
-                if response.ok and "application/pdf" in ct:
-                    pdf_bytes = await response.body()
-                    filename = show_url.rsplit("/",1)[-1].replace(".aspx", ".pdf")
-                    with open(filename, "wb") as f:
-                        f.write(pdf_bytes)
-                    await save_storage_state(page)
-                    await browser.close()
-                    print(f"[INFO] Fallback PDF saved: {filename}")
-                    return filename
-                else:
-                    print(f"[ERROR] Fallback POST failed: {response.status} {ct}")
-                    await browser.close()
-                    return None
+            await browser.close()
+            print("[ERROR] No PDF URL after postback.")
+            return None
     except Exception as e:
         print(f"[ERROR] Playwright failed for {show_url}: {e}")
         return None
