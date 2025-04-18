@@ -236,17 +236,33 @@ async def download_schedule_playwright(show_url):
 
 def fetch_aspx_links():
     try:
-        print("[INFO] Fetching FosseData show links...")
-        soup = BeautifulSoup(requests.get("https://www.fossedata.co.uk/shows/Shows-To-Enter.aspx").text, "html.parser")
-        links = [
-            "https://www.fossedata.co.uk" + a.get("href")
-            for a in soup.select("a[href$='.aspx']")
-            if a.get("href") and re.match(r"^/shows/[^/]+\.aspx$", a.get("href"))
-        ]
+        print("[INFO] Fetching FosseData show links (Shows‑To‑Enter only)…")
+        resp = requests.get(
+            "https://www.fossedata.co.uk/shows/Shows-To-Enter.aspx"
+        )
+        soup = BeautifulSoup(resp.text, "html.parser")
+        links = []
+        for a in soup.select("a[href$='.aspx']"):
+            href = a.get("href")
+            # must be under /shows/, end in .aspx, but skip listing pages
+            if (
+                href
+                and href.startswith("/shows/")
+                and href.lower() not in (
+                    "/shows/shows-to-enter.aspx",
+                    "/shows/shows-starting-soon.aspx",
+                )
+                and re.match(r"^/shows/[^/]+\.aspx$", href)
+            ):
+                links.append("https://www.fossedata.co.uk" + href)
+
+        # dedupe just in case
+        links = list(dict.fromkeys(links))
         with open("aspx_links.txt", "w") as f:
             f.write("\n".join(links))
         print(f"[INFO] Found {len(links)} show links.")
         return links
+
     except Exception as e:
         print(f"[ERROR] Error fetching ASPX links: {e}")
         return []
