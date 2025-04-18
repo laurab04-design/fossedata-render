@@ -1,12 +1,11 @@
 services:
-  - type: cron
+  - type: web
     name: fossedata-crawler
     env: docker
     repo: https://github.com/laurab04-design/fossedata-render
     branch: main
     dockerfilePath: Dockerfile
-    schedule: "0 18 * * 5"  # Every Friday at 6pm
-    startCommand: python main.py
+    startCommand: uvicorn main:app --host 0.0.0.0 --port 10000
     envVars:
       - key: GOOGLE_MAPS_API_KEY
         sync: false
