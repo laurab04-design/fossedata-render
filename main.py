@@ -36,3 +36,8 @@ async def trigger_run():
     except asyncio.TimeoutError:
         # Return a 504 if it runs too long
         raise HTTPException(status_code=504, detail="Run timed out after 60 seconds")
+
+# Add this to make sure it runs if launched directly (like locally, not on Render)
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
