@@ -32,6 +32,21 @@ OVERNIGHT_COST = float(os.environ.get("OVERNIGHT_COST", 100))
 ALWAYS_INCLUDE_CLASS = os.environ.get("ALWAYS_INCLUDE_CLASS", "").split(",")
 CLASS_EXCLUSIONS = [x.strip() for x in os.environ.get("DOG_CLASS_EXCLUSIONS", "").split(",")]
 
+# Playwright setup for cookie state persistence
+async def save_storage_state(page, state_file="storage_state.json"):
+    storage = await page.context.storage_state()
+    with open(state_file, "w") as f:
+        json.dump(storage, f)
+
+async def load_storage_state(context, state_file="storage_state.json"):
+    if Path(state_file).exists():
+        with open(state_file, "r") as f:
+            storage = json.load(f)
+            await context.add_cookies(storage.get("cookies", []))
+            print(f"[INFO] Loaded storage state from {state_file}")
+    else:
+        print(f"[INFO] No storage state found, starting fresh.")
+
 def extract_text_from_pdf(file_path):
     try:
         with pdfplumber.open(file_path) as pdf:
@@ -156,17 +171,9 @@ async def download_schedule_playwright(show_url):
             page = await browser.new_page()
             print(f"[INFO] Navigating to {show_url}...")
             await page.goto(show_url)
+            await load_storage_state(page.context)  # Load cookies and storage state if exists
             await page.wait_for_load_state("networkidle")
-            print(f"[INFO] Page loaded, dismissing cookies if needed...")
-
-            # Try dismissing the cookie banner
-            try:
-                await page.click('div[id^="cookiescript_injected"] button', timeout=3000)
-                print("[INFO] Cookie banner dismissed.")
-            except:
-                print("[INFO] No cookie banner found or already dismissed.")
-
-            print(f"[INFO] Waiting for 'Schedule' button...")
+            print(f"[INFO] Page loaded, waiting for 'Schedule' button...")
 
             async with page.expect_download() as download_info:
                 await page.click('input[type="submit"][value*="Schedule"]', timeout=15000)
@@ -174,6 +181,7 @@ async def download_schedule_playwright(show_url):
             download = await download_info.value
             filename = download.suggested_filename
             await download.save_as(filename)
+            await save_storage_state(page)  # Save cookies and storage state for future requests
             await browser.close()
             print(f"[INFO] Downloaded and saved: {filename}")
             return filename
@@ -184,33 +192,18 @@ async def download_schedule_playwright(show_url):
 
 def fetch_aspx_links():
     try:
-        source_url = "https://www.fossedata.co.uk/shows/Shows-To-Enter.aspx"
-        print(f"[INFO] Fetching show links from: {source_url}")
-        soup = BeautifulSoup(requests.get(source_url).text, "html.parser")
-
-        all_links = [a.get("href") for a in soup.select("a[href$='.aspx']") if a.get("href")]
-        print(f"[DEBUG] Found {len(all_links)} .aspx links on Shows-To-Enter.aspx")
-
-        filtered = []
-        for href in all_links:
-            if not href.lower().startswith("/shows/"):
-                print(f"[DEBUG] Rejected (not in /shows/): {href}")
-                continue
-            filename = href.split("/")[-1].lower()
-            if filename in {"shows-to-enter.aspx", "shows-starting-soon.aspx"}:
-                print(f"[DEBUG] Rejected (listing page): {href}")
-                continue
-            full_url = "https://www.fossedata.co.uk" + href
-            if full_url not in filtered:
-                print(f"[DEBUG] Accepted show link: {href}")
-                filtered.append(full_url)
-
+        print("[INFO] Fetching FosseData show links...")
+        soup = BeautifulSoup(requests.get("https://www.fossedata.co.uk/shows/Shows-To-Enter.aspx").text, "html.parser")
+        links = [
+            "https://www.fossedata.co.uk" + a.get("href")
+            for a in soup.select("a[href$='.aspx']")
+            if a.get("href")
+            and re.match(r"^/shows/[^/]+\.aspx$", a.get("href"))  # Only individual show pages
+        ]
         with open("aspx_links.txt", "w") as f:
-            f.write("\n".join(filtered))
-
-        print(f"[INFO] Returning {len(filtered)} filtered show links.")
-        return filtered
-
+            f.write("\n".join(links))
+        print(f"[INFO] Found {len(links)} show links.")
+        return links
     except Exception as e:
         print(f"[ERROR] Error fetching ASPX links: {e}")
         return []
@@ -221,8 +214,6 @@ async def full_run():
     if not urls:
         print("[WARN] No show URLs found.")
         return []
-
-    print(f"[DEBUG] Starting schedule scrape for {len(urls)} show URLs.")
 
     travel_cache = {}
     if os.path.exists(CACHE_FILE):
