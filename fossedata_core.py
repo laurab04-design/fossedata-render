@@ -10,6 +10,16 @@ from pathlib import Path
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
 
+import base64
+
+# Decode and write the Google service account credentials from environment variable
+creds_b64 = os.environ.get("GOOGLE_SERVICE_ACCOUNT_BASE64")
+if creds_b64:
+    with open("credentials.json", "wb") as f:
+        f.write(base64.b64decode(creds_b64))
+else:
+    print("GOOGLE_SERVICE_ACCOUNT_BASE64 is not set.")
+
 # Configuration
 HOME_POSTCODE = os.environ.get("HOME_POSTCODE", "YO8 9NA")
 GOOGLE_MAPS_API_KEY = os.environ.get("GOOGLE_MAPS_API_KEY")
