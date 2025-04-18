@@ -175,25 +175,26 @@ async def download_schedule_playwright(show_url):
 
 def fetch_aspx_links():
     try:
-        print("[INFO] Fetching FosseData show links...")
-        soup = BeautifulSoup(requests.get("https://www.fossedata.co.uk/shows.aspx").text, "html.parser")
+        source_url = "https://www.fossedata.co.uk/shows/Shows-To-Enter.aspx"
+        print(f"[INFO] Fetching show links from: {source_url}")
+        soup = BeautifulSoup(requests.get(source_url).text, "html.parser")
 
         all_links = [a.get("href") for a in soup.select("a[href$='.aspx']") if a.get("href")]
-        print(f"[DEBUG] Found {len(all_links)} .aspx links total.")
+        print(f"[DEBUG] Found {len(all_links)} .aspx links on Shows-To-Enter.aspx")
 
-        blacklist = {"Shows-To-Enter.aspx", "Shows-Starting-Soon.aspx"}
         filtered = []
-
         for href in all_links:
             if not href.lower().startswith("/shows/"):
                 print(f"[DEBUG] Rejected (not in /shows/): {href}")
                 continue
-            filename = href.split("/")[-1]
-            if filename in blacklist:
-                print(f"[DEBUG] Rejected (blacklisted): {href}")
+            filename = href.split("/")[-1].lower()
+            if filename in {"shows-to-enter.aspx", "shows-starting-soon.aspx"}:
+                print(f"[DEBUG] Rejected (listing page): {href}")
                 continue
-            print(f"[DEBUG] Accepted show link: {href}")
-            filtered.append("https://www.fossedata.co.uk" + href)
+            full_url = "https://www.fossedata.co.uk" + href
+            if full_url not in filtered:
+                print(f"[DEBUG] Accepted show link: {href}")
+                filtered.append(full_url)
 
         with open("aspx_links.txt", "w") as f:
             f.write("\n".join(filtered))
