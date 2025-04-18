@@ -157,7 +157,16 @@ async def download_schedule_playwright(show_url):
             print(f"[INFO] Navigating to {show_url}...")
             await page.goto(show_url)
             await page.wait_for_load_state("networkidle")
-            print(f"[INFO] Page loaded, waiting for 'Schedule' button...")
+            print(f"[INFO] Page loaded, dismissing cookies if needed...")
+
+            # Try dismissing the cookie banner
+            try:
+                await page.click('div[id^="cookiescript_injected"] button', timeout=3000)
+                print("[INFO] Cookie banner dismissed.")
+            except:
+                print("[INFO] No cookie banner found or already dismissed.")
+
+            print(f"[INFO] Waiting for 'Schedule' button...")
 
             async with page.expect_download() as download_info:
                 await page.click('input[type="submit"][value*="Schedule"]', timeout=15000)
