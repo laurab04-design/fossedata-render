@@ -176,7 +176,7 @@ async def download_schedule_playwright(show_url):
                 except Exception as e:
                     print(f"[REQUEST FAILED] {request.url} -> error inspecting failure: {e}")
 
-            page.on("console", lambda msg: print("[PAGE LOG]", msg.text()))
+            page.on("console", lambda msg: print("[PAGE LOG]", msg.text))
             page.on("requestfailed", on_request_failed)
 
             await page.goto(show_url, wait_until="networkidle")
