@@ -163,22 +163,36 @@ def should_include_class(name):
         return True
     return False
 
-# PDF scraping with overlay removal + force click fallback
+# PDF scraping with diagnostics
 async def download_schedule_playwright(show_url):
     try:
         print(f"[INFO] Launching Playwright for: {show_url}")
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
             page = await browser.new_page()
+            # Log console messages and failed requests
+            page.on("console", lambda msg: print("[PAGE LOG]", msg.text))
+            page.on("requestfailed", lambda req: print(f"[REQUEST FAILED] {req.url} -> {req.failure.error_text}"))
 
             await page.goto(show_url, wait_until="networkidle")
             await load_storage_state(page.context)
+
+            # Dump HTML around the button
+            html = await page.content()
+            before, after = html.split('id="ctl00_ContentPlaceHolder_btnDownloadSchedule"', 1)
+            print("---HTML BEFORE BUTTON---", before[-200:])
+            print("---HTML AFTER BUTTON---", after[:200])
+
+            # Screenshot
+            await page.screenshot(path="before_click.png", full_page=True)
 
             # Remove any injected overlay
             await page.evaluate("""
                 const banner = document.getElementById('cookiescript_injected_wrapper');
                 if (banner) banner.remove();
             """)
+            still = await page.evaluate("!!document.getElementById('cookiescript_injected_wrapper')")
+            print("[INFO] Overlay still present?", still)
 
             await page.wait_for_selector("#ctl00_ContentPlaceHolder_btnDownloadSchedule", state="visible", timeout=30000)
             print("[INFO] Schedule button is visible — clicking…")
