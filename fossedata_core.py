@@ -150,18 +150,25 @@ def should_include_class(name):
 
 async def download_schedule_playwright(show_url):
     try:
+        print(f"[INFO] Launching Playwright for: {show_url}")
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
             page = await browser.new_page()
+            print(f"[INFO] Navigating to {show_url}...")
             await page.goto(show_url)
             await page.wait_for_load_state("networkidle")
+            print(f"[INFO] Page loaded, waiting for 'Schedule' button...")
+
             async with page.expect_download() as download_info:
-                await page.click('input[type="submit"][value*="Schedule"]', timeout=5000)
+                await page.click('input[type="submit"][value*="Schedule"]', timeout=15000)
+
             download = await download_info.value
             filename = download.suggested_filename
             await download.save_as(filename)
             await browser.close()
+            print(f"[INFO] Downloaded and saved: {filename}")
             return filename
+
     except Exception as e:
         print(f"[ERROR] Playwright failed for {show_url}: {e}")
         return None
