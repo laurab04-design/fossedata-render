@@ -181,13 +181,19 @@ def fetch_aspx_links():
         all_links = [a.get("href") for a in soup.select("a[href$='.aspx']") if a.get("href")]
         print(f"[DEBUG] Found {len(all_links)} .aspx links total.")
 
+        blacklist = {"Shows-To-Enter.aspx", "Shows-Starting-Soon.aspx"}
         filtered = []
+
         for href in all_links:
-            if re.match(r"^/shows/[^/]+\.aspx$", href):
-                print(f"[DEBUG] Accepted show link: {href}")
-                filtered.append("https://www.fossedata.co.uk" + href)
-            else:
-                print(f"[DEBUG] Rejected link: {href}")
+            if not href.lower().startswith("/shows/"):
+                print(f"[DEBUG] Rejected (not in /shows/): {href}")
+                continue
+            filename = href.split("/")[-1]
+            if filename in blacklist:
+                print(f"[DEBUG] Rejected (blacklisted): {href}")
+                continue
+            print(f"[DEBUG] Accepted show link: {href}")
+            filtered.append("https://www.fossedata.co.uk" + href)
 
         with open("aspx_links.txt", "w") as f:
             f.write("\n".join(filtered))
