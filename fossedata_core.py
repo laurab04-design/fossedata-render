@@ -175,24 +175,27 @@ async def download_schedule_playwright(show_url):
 
 def fetch_aspx_links():
     try:
+        print("[INFO] Fetching FosseData show links...")
         soup = BeautifulSoup(requests.get("https://www.fossedata.co.uk/shows.aspx").text, "html.parser")
         links = [
             "https://www.fossedata.co.uk" + a.get("href")
             for a in soup.select("a[href$='.aspx']")
-            if a.get("href") and "/shows/" in a.get("href").lower()
+            if a.get("href")
+            and re.match(r"^/shows/[^/]+\.aspx$", a.get("href"))  # Only individual show pages
         ]
         with open("aspx_links.txt", "w") as f:
             f.write("\n".join(links))
+        print(f"[INFO] Found {len(links)} show links.")
         return links
     except Exception as e:
-        print(f"Error fetching ASPX links: {e}")
+        print(f"[ERROR] Error fetching ASPX links: {e}")
         return []
 
 async def full_run():
     global travel_cache
     urls = fetch_aspx_links()
     if not urls:
-        print("No show URLs found.")
+        print("[WARN] No show URLs found.")
         return []
 
     travel_cache = {}
@@ -207,7 +210,7 @@ async def full_run():
             continue
         text = extract_text_from_pdf(pdf)
         if "golden" not in text.lower():
-            print(f"Skipping {pdf} — no 'golden'")
+            print(f"[INFO] Skipping {pdf} — no 'golden'")
             continue
         postcode = get_postcode(text)
         travel = get_drive(HOME_POSTCODE, postcode, travel_cache) if postcode else None
@@ -253,5 +256,5 @@ async def full_run():
                 "Yes" if s.get("clash") else "",
                 combos
             ])
-    print(f"Processed {len(shows)} shows with Golden Retriever classes.")
+    print(f"[INFO] Processed {len(shows)} shows with Golden Retriever classes.")
     return shows
