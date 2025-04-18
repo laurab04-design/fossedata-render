@@ -30,14 +30,10 @@ app = FastAPI()
 @app.get("/run")
 async def trigger_run():
     try:
-        # Auto‑cancel the full_run() after 60 seconds
+        # Auto‑cancel the full_run() after 60 seconds for testing
         shows = await asyncio.wait_for(full_run(), timeout=60.0)
         return {"status": "completed", "shows": len(shows)}
     except asyncio.TimeoutError:
-        # Return a 504 if it runs too long
         raise HTTPException(status_code=504, detail="Run timed out after 60 seconds")
-
-# Add this to make sure it runs if launched directly (like locally, not on Render)
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
