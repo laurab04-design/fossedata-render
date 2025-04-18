@@ -1,3 +1,14 @@
+from fastapi import FastAPI
+import uvicorn
+
+app = FastAPI()
+
+@app.get("/run")
+def trigger_run():
+    from fossedata_core import full_run
+    result = full_run()
+    return {"status": "completed", "shows": len(result)}
+
 from pathlib import Path
 
 # Debugging: Check if the Chromium executable exists
