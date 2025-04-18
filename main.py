@@ -27,13 +27,17 @@ except Exception as e:
 # --- FastAPI web trigger setup ---
 app = FastAPI()
 
+@app.get("/")
+async def root():
+    return {"status": "ok", "message": "FosseData Render service is running."}
+
 @app.get("/run")
 async def trigger_run():
     try:
-        # Auto‑cancel the full_run() after 60 seconds for testing
-        shows = await asyncio.wait_for(full_run(), timeout=60.0)
+        # Bump timeout to 120s so we don’t keep cutting off
+        shows = await asyncio.wait_for(full_run(), timeout=120.0)
         return {"status": "completed", "shows": len(shows)}
     except asyncio.TimeoutError:
-        raise HTTPException(status_code=504, detail="Run timed out after 60 seconds")
+        raise HTTPException(status_code=504, detail="Run timed out after 120 seconds")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Run failed: {e}")
