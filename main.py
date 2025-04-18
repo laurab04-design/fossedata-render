@@ -34,10 +34,9 @@ async def root():
 @app.get("/run")
 async def trigger_run():
     try:
-        # Bump timeout to 120s so we don’t keep cutting off
-        shows = await asyncio.wait_for(full_run(), timeout=120.0)
+        # No more manual timeout—let full_run run to completion
+        shows = await full_run()
         return {"status": "completed", "shows": len(shows)}
-    except asyncio.TimeoutError:
-        raise HTTPException(status_code=504, detail="Run timed out after 120 seconds")
     except Exception as e:
+        # Catches anything that blows up inside full_run
         raise HTTPException(status_code=500, detail=f"Run failed: {e}")
