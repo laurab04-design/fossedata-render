@@ -32,7 +32,7 @@ OVERNIGHT_COST = float(os.environ.get("OVERNIGHT_COST", 100))
 ALWAYS_INCLUDE_CLASS = os.environ.get("ALWAYS_INCLUDE_CLASS", "").split(",")
 CLASS_EXCLUSIONS = [x.strip() for x in os.environ.get("DOG_CLASS_EXCLUSIONS", "").split(",")]
 
-# Playwright setup for cookie state persistence
+# Playwright storage persistence
 async def save_storage_state(page, state_file="storage_state.json"):
     storage = await page.context.storage_state()
     with open(state_file, "w") as f:
@@ -42,11 +42,13 @@ async def load_storage_state(context, state_file="storage_state.json"):
     if Path(state_file).exists():
         with open(state_file, "r") as f:
             storage = json.load(f)
-            await context.add_cookies(storage.get("cookies", []))
-            print(f"[INFO] Loaded storage state from {state_file}")
+            if storage.get("cookies"):
+                await context.add_cookies(storage.get("cookies"))
+        print(f"[INFO] Loaded storage state from {state_file}")
     else:
         print(f"[INFO] No storage state found, starting fresh.")
 
+# PDF extraction
 def extract_text_from_pdf(file_path):
     try:
         with pdfplumber.open(file_path) as pdf:
@@ -54,6 +56,8 @@ def extract_text_from_pdf(file_path):
     except Exception as e:
         print(f"[ERROR] PDF extract failed for {file_path}: {e}")
         return ""
+
+# Utility functions
 
 def get_postcode(text):
     match = re.search(r"\b([A-Z]{1,2}\d{1,2}[A-Z]?) ?\d[A-Z]{2}\b", text)
@@ -64,12 +68,10 @@ def get_drive(from_pc, to_pc, cache):
     if key in cache:
         return cache[key]
     try:
-        r = requests.get("https://maps.googleapis.com/maps/api/distancematrix/json", params={
-            "origins": from_pc,
-            "destinations": to_pc,
-            "mode": "driving",
-            "key": GOOGLE_MAPS_API_KEY
-        })
+        r = requests.get(
+            "https://maps.googleapis.com/maps/api/distancematrix/json",
+            params={"origins": from_pc, "destinations": to_pc, "mode": "driving", "key": GOOGLE_MAPS_API_KEY}
+        )
         e = r.json()["rows"][0]["elements"][0]
         result = {"duration": e["duration"]["value"], "distance": e["distance"]["value"] / 1000}
         cache[key] = result
@@ -132,20 +134,18 @@ def jw_points(text):
 def find_clashes_and_combos(results):
     date_map = {}
     for show in results:
-        date = show["date"]
+        date = show.get("date")
         if date:
             date_map.setdefault(date, []).append(show)
-
     for same_day in date_map.values():
         if len(same_day) > 1:
             for s in same_day:
                 s["clash"] = True
-
     for i, a in enumerate(results):
-        if not a["postcode"] or a["duration_hr"] <= 3:
+        if not a.get("postcode") or a.get("duration_hr", 0) <= 3:
             continue
         for j, b in enumerate(results):
-            if i == j or not b["postcode"] or b["duration_hr"] <= 3:
+            if i == j or not b.get("postcode") or b.get("duration_hr", 0) <= 3:
                 continue
             da = datetime.datetime.strptime(a["date"], "%Y-%m-%d")
             db = datetime.datetime.strptime(b["date"], "%Y-%m-%d")
@@ -163,33 +163,45 @@ def should_include_class(name):
         return True
     return False
 
+# PDF scraping with overlay removal + force click fallback
 async def download_schedule_playwright(show_url):
     try:
         print(f"[INFO] Launching Playwright for: {show_url}")
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
             page = await browser.new_page()
-            print(f"[INFO] Navigating to {show_url}...")
-            await page.goto(show_url)
-            await load_storage_state(page.context)  # Load cookies and storage state if exists
-            await page.wait_for_load_state("networkidle")
-            print(f"[INFO] Page loaded, waiting for 'Schedule' button...")
 
-            async with page.expect_download() as download_info:
-                await page.click('input[type="submit"][value*="Schedule"]', timeout=15000)
+            await page.goto(show_url, wait_until="networkidle")
+            await load_storage_state(page.context)
 
-            download = await download_info.value
+            # Remove any injected overlay
+            await page.evaluate("""
+                const banner = document.getElementById('cookiescript_injected_wrapper');
+                if (banner) banner.remove();
+            """)
+
+            await page.wait_for_selector("#ctl00_ContentPlaceHolder_btnDownloadSchedule", state="visible", timeout=30000)
+            print("[INFO] Schedule button is visible — clicking…")
+            try:
+                async with page.expect_download() as dl:
+                    await page.click("#ctl00_ContentPlaceHolder_btnDownloadSchedule", timeout=30000)
+            except Exception:
+                print("[WARN] Normal click failed; retrying with force.")
+                async with page.expect_download() as dl:
+                    await page.click("#ctl00_ContentPlaceHolder_btnDownloadSchedule", timeout=30000, force=True)
+
+            download = await dl.value
             filename = download.suggested_filename
             await download.save_as(filename)
-            await save_storage_state(page)  # Save cookies and storage state for future requests
+            await save_storage_state(page)
             await browser.close()
             print(f"[INFO] Downloaded and saved: {filename}")
             return filename
-
     except Exception as e:
         print(f"[ERROR] Playwright failed for {show_url}: {e}")
         return None
 
+# Fetch show links
 def fetch_aspx_links():
     try:
         print("[INFO] Fetching FosseData show links...")
@@ -197,8 +209,7 @@ def fetch_aspx_links():
         links = [
             "https://www.fossedata.co.uk" + a.get("href")
             for a in soup.select("a[href$='.aspx']")
-            if a.get("href")
-            and re.match(r"^/shows/[^/]+\.aspx$", a.get("href"))  # Only individual show pages
+            if a.get("href") and re.match(r"^/shows/[^/]+\.aspx$", a.get("href"))
         ]
         with open("aspx_links.txt", "w") as f:
             f.write("\n".join(links))
@@ -208,6 +219,7 @@ def fetch_aspx_links():
         print(f"[ERROR] Error fetching ASPX links: {e}")
         return []
 
+# Main run function
 async def full_run():
     global travel_cache
     urls = fetch_aspx_links()
@@ -248,6 +260,7 @@ async def full_run():
 
     find_clashes_and_combos(shows)
 
+    # Save results
     with open("results.json", "w") as f:
         json.dump(shows, f, indent=2)
 
@@ -260,7 +273,7 @@ async def full_run():
         for s in shows:
             judge = s.get("judge", {})
             judge_text = ", ".join(f"{k}: {v}" for k, v in judge.items()) if judge else ""
-            combos = "; ".join(s.get("combo_with", [])) if "combo_with" in s else ""
+            combos = "; ".join(s.get("combo_with", []))
             writer.writerow([
                 s["show"],
                 s["date"],
