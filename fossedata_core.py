@@ -170,47 +170,65 @@ async def download_schedule_playwright(show_url):
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
             page = await browser.new_page()
-            # Log console messages and failed requests
-            page.on("console", lambda msg: print("[PAGE LOG]", msg.text))
-            page.on("requestfailed", lambda req: print(f"[REQUEST FAILED] {req.url} -> {req.failure.error_text}"))
 
+            # Console + guarded request‑failure logging
+            page.on("console", lambda msg: print("[PAGE LOG]", msg.text))
+            page.on("requestfailed", on_request_failed)
+
+            # Navigate + restore cookies/storage
             await page.goto(show_url, wait_until="networkidle")
             await load_storage_state(page.context)
 
-            # Dump HTML around the button
-            html = await page.content()
-            before, after = html.split('id="ctl00_ContentPlaceHolder_btnDownloadSchedule"', 1)
-            print("---HTML BEFORE BUTTON---", before[-200:])
-            print("---HTML AFTER BUTTON---", after[:200])
-
-            # Screenshot
-            await page.screenshot(path="before_click.png", full_page=True)
-
-            # Remove any injected overlay
+            # Strip any annoying overlay
             await page.evaluate("""
-                const banner = document.getElementById('cookiescript_injected_wrapper');
-                if (banner) banner.remove();
+                const b = document.getElementById('cookiescript_injected_wrapper');
+                if (b) b.remove();
             """)
-            still = await page.evaluate("!!document.getElementById('cookiescript_injected_wrapper')")
-            print("[INFO] Overlay still present?", still)
 
-            await page.wait_for_selector("#ctl00_ContentPlaceHolder_btnDownloadSchedule", state="visible", timeout=30000)
-            print("[INFO] Schedule button is visible — clicking…")
+            # 1) Try the normal click → download flow
             try:
                 async with page.expect_download() as dl:
                     await page.click("#ctl00_ContentPlaceHolder_btnDownloadSchedule", timeout=30000)
-            except Exception:
-                print("[WARN] Normal click failed; retrying with force.")
-                async with page.expect_download() as dl:
-                    await page.click("#ctl00_ContentPlaceHolder_btnDownloadSchedule", timeout=30000, force=True)
+                download = await dl.value
+                filename = download.suggested_filename
+                await download.save_as(filename)
+                await save_storage_state(page)
+                await browser.close()
+                print(f"[INFO] Downloaded and saved: {filename}")
+                return filename
 
-            download = await dl.value
-            filename = download.suggested_filename
-            await download.save_as(filename)
-            await save_storage_state(page)
-            await browser.close()
-            print(f"[INFO] Downloaded and saved: {filename}")
-            return filename
+            # 2) Fallback: manually POST the form back to the server
+            except Exception:
+                print("[WARN] Playwright download didn’t fire — falling back to HTTP POST…")
+
+                # Grab all hidden/viewstate fields
+                form_data = await page.evaluate("""
+                    () => {
+                        const data = {};
+                        for (const [k,v] of new FormData(document.querySelector('form#aspnetForm'))) {
+                            data[k] = v;
+                        }
+                        return data;
+                    }
+                """)
+
+                # Send a raw POST; if it returns a PDF, write it out
+                response = await page.context.request.post(show_url, data=form_data)
+                ct = response.headers.get("content-type", "")
+                if response.ok and "application/pdf" in ct:
+                    pdf_bytes = await response.body()
+                    filename = show_url.rsplit("/",1)[-1].replace(".aspx", ".pdf")
+                    with open(filename, "wb") as f:
+                        f.write(pdf_bytes)
+                    await save_storage_state(page)
+                    await browser.close()
+                    print(f"[INFO] Fallback PDF saved: {filename}")
+                    return filename
+                else:
+                    print(f"[ERROR] Fallback POST failed: {response.status} {ct}")
+                    await browser.close()
+                    return None
+
     except Exception as e:
         print(f"[ERROR] Playwright failed for {show_url}: {e}")
         return None
