@@ -2,7 +2,6 @@ import os
 import re
 import csv
 import json
-import time
 import datetime
 import base64
 import requests
@@ -58,7 +57,6 @@ def extract_text_from_pdf(file_path):
         return ""
 
 # Utility functions
-
 def get_postcode(text):
     match = re.search(r"\b([A-Z]{1,2}\d{1,2}[A-Z]?) ?\d[A-Z]{2}\b", text)
     return match.group(0) if match else None
@@ -68,10 +66,12 @@ def get_drive(from_pc, to_pc, cache):
     if key in cache:
         return cache[key]
     try:
-        r = requests.get(
-            "https://maps.googleapis.com/maps/api/distancematrix/json",
-            params={"origins": from_pc, "destinations": to_pc, "mode": "driving", "key": GOOGLE_MAPS_API_KEY}
-        )
+        r = requests.get("https://maps.googleapis.com/maps/api/distancematrix/json", params={
+            "origins": from_pc,
+            "destinations": to_pc,
+            "mode": "driving",
+            "key": GOOGLE_MAPS_API_KEY
+        })
         e = r.json()["rows"][0]["elements"][0]
         result = {"duration": e["duration"]["value"], "distance": e["distance"]["value"] / 1000}
         cache[key] = result
@@ -86,7 +86,7 @@ def get_diesel_price():
     try:
         soup = BeautifulSoup(requests.get("https://www.globalpetrolprices.com/diesel_prices/").text, "html.parser")
         uk_row = soup.find("td", string=re.compile("United Kingdom")).find_parent("tr")
-        return float(uk_row.find_all("td")[2].text.strip().replace("£", ""))
+        return float(uk_row.find_all("td")[2].text.strip().replace("\u00a3", ""))
     except:
         return 1.60
 
@@ -169,9 +169,9 @@ async def download_schedule_playwright(show_url):
         print(f"[INFO] Launching Playwright for: {show_url}")
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
-            page = await browser.new_page()
+            context = await browser.new_context()
+            page = await context.new_page()
 
-            # Console + guarded request‑failure logging
             def on_request_failed(request):
                 try:
                     print(f"[REQUEST FAILED] {request.url} -> {request.failure}")
@@ -180,33 +180,25 @@ async def download_schedule_playwright(show_url):
             page.on("console", lambda msg: print("[PAGE LOG]", msg.text()))
             page.on("requestfailed", on_request_failed)
 
-            # Navigate + restore cookies/storage
             await page.goto(show_url, wait_until="networkidle")
-            await load_storage_state(page.context)
-
-            # Strip any annoying overlay
+            await load_storage_state(context)
             await page.evaluate("""
                 const b = document.getElementById('cookiescript_injected_wrapper');
                 if (b) b.remove();
             """)
 
-            # 1) Try the normal click → download flow
             try:
-                async with page.expect_download() as dl:
+                async with page.expect_download() as download_info:
                     await page.click("#ctl00_ContentPlaceHolder_btnDownloadSchedule", timeout=30000)
-                download = await dl.value
+                download = await download_info.value
                 filename = download.suggested_filename
                 await download.save_as(filename)
                 await save_storage_state(page)
                 await browser.close()
                 print(f"[INFO] Downloaded and saved: {filename}")
                 return filename
-
-            # 2) Fallback: manually POST the form back to the server
             except Exception:
                 print("[WARN] Playwright download didn’t fire — falling back to HTTP POST…")
-
-                # Grab all hidden/viewstate fields
                 form_data = await page.evaluate("""
                     () => {
                         const data = {};
@@ -216,8 +208,6 @@ async def download_schedule_playwright(show_url):
                         return data;
                     }
                 """)
-
-                # Send a raw POST; if it returns a PDF, write it out
                 response = await page.context.request.post(show_url, data=form_data)
                 ct = response.headers.get("content-type", "")
                 if response.ok and "application/pdf" in ct:
@@ -233,12 +223,10 @@ async def download_schedule_playwright(show_url):
                     print(f"[ERROR] Fallback POST failed: {response.status} {ct}")
                     await browser.close()
                     return None
-
     except Exception as e:
         print(f"[ERROR] Playwright failed for {show_url}: {e}")
         return None
 
-# Fetch show links
 def fetch_aspx_links():
     try:
         print("[INFO] Fetching FosseData show links...")
@@ -256,7 +244,6 @@ def fetch_aspx_links():
         print(f"[ERROR] Error fetching ASPX links: {e}")
         return []
 
-# Main run function
 async def full_run():
     global travel_cache
     urls = fetch_aspx_links()
@@ -297,7 +284,6 @@ async def full_run():
 
     find_clashes_and_combos(shows)
 
-    # Save results
     with open("results.json", "w") as f:
         json.dump(shows, f, indent=2)
 
