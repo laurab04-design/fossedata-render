@@ -177,16 +177,24 @@ def fetch_aspx_links():
     try:
         print("[INFO] Fetching FosseData show links...")
         soup = BeautifulSoup(requests.get("https://www.fossedata.co.uk/shows.aspx").text, "html.parser")
-        links = [
-            "https://www.fossedata.co.uk" + a.get("href")
-            for a in soup.select("a[href$='.aspx']")
-            if a.get("href")
-            and re.match(r"^/shows/[^/]+\.aspx$", a.get("href"))  # Only individual show pages
-        ]
+
+        all_links = [a.get("href") for a in soup.select("a[href$='.aspx']") if a.get("href")]
+        print(f"[DEBUG] Found {len(all_links)} .aspx links total.")
+
+        filtered = []
+        for href in all_links:
+            if re.match(r"^/shows/[^/]+\.aspx$", href):
+                print(f"[DEBUG] Accepted show link: {href}")
+                filtered.append("https://www.fossedata.co.uk" + href)
+            else:
+                print(f"[DEBUG] Rejected link: {href}")
+
         with open("aspx_links.txt", "w") as f:
-            f.write("\n".join(links))
-        print(f"[INFO] Found {len(links)} show links.")
-        return links
+            f.write("\n".join(filtered))
+
+        print(f"[INFO] Returning {len(filtered)} filtered show links.")
+        return filtered
+
     except Exception as e:
         print(f"[ERROR] Error fetching ASPX links: {e}")
         return []
@@ -197,6 +205,8 @@ async def full_run():
     if not urls:
         print("[WARN] No show URLs found.")
         return []
+
+    print(f"[DEBUG] Starting schedule scrape for {len(urls)} show URLs.")
 
     travel_cache = {}
     if os.path.exists(CACHE_FILE):
