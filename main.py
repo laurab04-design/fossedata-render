@@ -29,8 +29,3 @@ def trigger_run():
     from fossedata_core import full_run
     result = full_run()
     return {"status": "completed", "shows": len(result)}
-
-# === Optional CLI trigger ===
-if __name__ == "__main__":
-    from fossedata_core import full_run
-    full_run()
