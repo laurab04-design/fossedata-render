@@ -85,7 +85,7 @@ def get_diesel_price():
     try:
         soup = BeautifulSoup(requests.get("https://www.globalpetrolprices.com/diesel_prices/").text, "html.parser")
         uk_row = soup.find("td", string=re.compile("United Kingdom")).find_parent("tr")
-        return float(uk_row.find_all("td")[2].text.strip().replace("\u00a3", ""))
+        return float(uk_row.find_all("td")[2].text.strip().replace("£", ""))
     except:
         return 1.60
 
@@ -162,7 +162,7 @@ def should_include_class(name):
         return True
     return False
 
-# PDF scraping with robust fallback
+# PDF scraping with diagnostics
 async def download_schedule_playwright(show_url):
     try:
         print(f"[INFO] Launching Playwright for: {show_url}")
@@ -170,31 +170,37 @@ async def download_schedule_playwright(show_url):
             browser = await p.chromium.launch(headless=True)
             page = await browser.new_page()
 
-            def on_request_failed(request):
-                try:
-                    print(f"[REQUEST FAILED] {request.url} -> {request.failure}")
-                except Exception as e:
-                    print(f"[REQUEST FAILED] {request.url} -> error inspecting failure: {e}")
-
-          # Console + guarded request‑failure logging
+            # Console handler
             def on_console(msg):
                 try:
                     print("[PAGE LOG]", msg.text)
                 except Exception as e:
                     print(f"[ERROR] console handler: {e!r}")
+
+            # Request-failed handler
+            def on_request_failed(request):
+                try:
+                    print(f"[REQUEST FAILED] {request.url} -> {request.failure}")
+                except Exception as e:
+                    print(f"[REQUEST FAILED] {request.url} -> error inspecting failure: {e!r}")
+
             page.on("console", on_console)
             page.on("requestfailed", on_request_failed)
 
+            # Navigate + load cookies
             await page.goto(show_url, wait_until="networkidle")
             await load_storage_state(page.context)
+
+            # Remove any overlay
             await page.evaluate("""
                 const b = document.getElementById('cookiescript_injected_wrapper');
                 if (b) b.remove();
             """)
 
+            # 1) try normal click/download
             try:
                 async with page.expect_download() as dl:
-                    await page.click("input[type=submit][value*='Schedule']", timeout=30000)
+                    await page.click("#ctl00_ContentPlaceHolder_btnDownloadSchedule", timeout=30000)
                 download = await dl.value
                 filename = download.suggested_filename
                 await download.save_as(filename)
@@ -203,6 +209,7 @@ async def download_schedule_playwright(show_url):
                 print(f"[INFO] Downloaded and saved: {filename}")
                 return filename
 
+            # 2) fallback: postback HTTP
             except Exception:
                 print("[WARN] Playwright download didn’t fire — falling back to HTTP POST…")
                 form_data = await page.evaluate("""
@@ -234,39 +241,27 @@ async def download_schedule_playwright(show_url):
         print(f"[ERROR] Playwright failed for {show_url}: {e}")
         return None
 
+# Fetch show links
 def fetch_aspx_links():
     try:
-        print("[INFO] Fetching FosseData show links (Shows‑To‑Enter only)…")
-        resp = requests.get(
+        print("[INFO] Fetching FosseData show links...")
+        soup = BeautifulSoup(requests.get(
             "https://www.fossedata.co.uk/shows/Shows-To-Enter.aspx"
-        )
-        soup = BeautifulSoup(resp.text, "html.parser")
-        links = []
-        for a in soup.select("a[href$='.aspx']"):
-            href = a.get("href")
-            # must be under /shows/, end in .aspx, but skip listing pages
-            if (
-                href
-                and href.startswith("/shows/")
-                and href.lower() not in (
-                    "/shows/shows-to-enter.aspx",
-                    "/shows/shows-starting-soon.aspx",
-                )
-                and re.match(r"^/shows/[^/]+\.aspx$", href)
-            ):
-                links.append("https://www.fossedata.co.uk" + href)
-
-        # dedupe just in case
-        links = list(dict.fromkeys(links))
+        ).text, "html.parser")
+        links = [
+            "https://www.fossedata.co.uk" + a.get("href")
+            for a in soup.select("a[href$='.aspx']")
+            if a.get("href") and re.match(r"^/shows/[^/]+\.aspx$", a.get("href"))
+        ]
         with open("aspx_links.txt", "w") as f:
             f.write("\n".join(links))
         print(f"[INFO] Found {len(links)} show links.")
         return links
-
     except Exception as e:
         print(f"[ERROR] Error fetching ASPX links: {e}")
         return []
 
+# Main run function
 async def full_run():
     global travel_cache
     urls = fetch_aspx_links()
@@ -307,9 +302,9 @@ async def full_run():
 
     find_clashes_and_combos(shows)
 
+    # Save results
     with open("results.json", "w") as f:
         json.dump(shows, f, indent=2)
-
     with open("results.csv", "w", newline="") as csvfile:
         writer = csv.writer(csvfile)
         writer.writerow([
@@ -332,5 +327,6 @@ async def full_run():
                 "Yes" if s.get("clash") else "",
                 combos
             ])
+
     print(f"[INFO] Processed {len(shows)} shows with Golden Retriever classes.")
     return shows
