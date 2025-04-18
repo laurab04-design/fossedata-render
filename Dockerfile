@@ -45,4 +45,4 @@ COPY . .
 RUN echo "Listing application directory files..." && ls -la /app
 
 # Force Playwright browser installation at runtime in case it's missing
-CMD ["sh", "-c", "playwright install chromium && ls -la /opt/render/.cache/ms-playwright && python main.py"]
+CMD ["sh", "-c", "playwright install --with-deps chromium && python main.py"]
