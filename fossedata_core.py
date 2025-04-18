@@ -4,15 +4,15 @@ import csv
 import json
 import time
 import datetime
+import base64
 import requests
 import pdfplumber
+import asyncio
 from pathlib import Path
 from bs4 import BeautifulSoup
-from playwright.sync_api import sync_playwright
+from playwright.async_api import async_playwright
 
-import base64
-
-# Decode and write the Google service account credentials from environment variable
+# Decode and write the Google service account credentials from env
 creds_b64 = os.environ.get("GOOGLE_SERVICE_ACCOUNT_BASE64")
 if creds_b64:
     with open("credentials.json", "wb") as f:
@@ -24,54 +24,20 @@ else:
 HOME_POSTCODE = os.environ.get("HOME_POSTCODE", "YO8 9NA")
 GOOGLE_MAPS_API_KEY = os.environ.get("GOOGLE_MAPS_API_KEY")
 CACHE_FILE = "travel_cache.json"
-DOG_DOB = datetime.datetime.strptime("2024-05-15", "%Y-%m-%d")
-DOG_NAME = "Delia"
-MPG = 40
-OVERNIGHT_THRESHOLD_HOURS = 3
-OVERNIGHT_COST = 100
-
-BASE_URL = "https://www.fossedata.co.uk/shows.aspx"
-OUTPUT_FILE = "aspx_links.txt"
-
-def fetch_aspx_links():
-    try:
-        response = requests.get(BASE_URL)
-        soup = BeautifulSoup(response.text, "html.parser")
-        links = []
-        for a in soup.select("a[href$='.aspx']"):
-            href = a.get("href")
-            if href and "/shows/" in href.lower():
-                links.append("https://www.fossedata.co.uk" + href)
-        with open(OUTPUT_FILE, "w") as f:
-            f.write("\n".join(links))
-        return links
-    except Exception as e:
-        print(f"[ERROR] Failed to fetch ASPX links: {e}")
-        return []
-
-def download_schedule_playwright(show_url):
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch()
-            page = browser.new_page()
-            page.goto(show_url)
-            page.wait_for_load_state("networkidle")
-            with page.expect_download() as download_info:
-                page.click('input[type="submit"][value*="Schedule"]', timeout=5000)
-                download = download_info.value
-                filename = download.suggested_filename
-                download.save_as(filename)
-            return filename
-    except Exception as e:
-        print(f"[ERROR] Playwright failed for {show_url}: {e}")
-        return None
+DOG_DOB = datetime.datetime.strptime(os.environ.get("DOG_DOB", "2024-05-15"), "%Y-%m-%d")
+DOG_NAME = os.environ.get("DOG_NAME", "Delia")
+MPG = float(os.environ.get("MPG", 40))
+OVERNIGHT_THRESHOLD_HOURS = float(os.environ.get("OVERNIGHT_THRESHOLD_HOURS", 3))
+OVERNIGHT_COST = float(os.environ.get("OVERNIGHT_COST", 100))
+ALWAYS_INCLUDE_CLASS = os.environ.get("ALWAYS_INCLUDE_CLASS", "").split(",")
+CLASS_EXCLUSIONS = [x.strip() for x in os.environ.get("DOG_CLASS_EXCLUSIONS", "").split(",")]
 
 def extract_text_from_pdf(file_path):
     try:
         with pdfplumber.open(file_path) as pdf:
             return "\n".join(page.extract_text() or "" for page in pdf.pages)
     except Exception as e:
-        print(f"[ERROR] PDF extraction failed: {e}")
+        print(f"[ERROR] PDF extract failed for {file_path}: {e}")
         return ""
 
 def get_postcode(text):
@@ -89,24 +55,19 @@ def get_drive(from_pc, to_pc, cache):
             "mode": "driving",
             "key": GOOGLE_MAPS_API_KEY
         })
-        data = r.json()
-        e = data["rows"][0]["elements"][0]
-        result = {
-            "duration": e["duration"]["value"],
-            "distance": e["distance"]["value"] / 1000,
-        }
+        e = r.json()["rows"][0]["elements"][0]
+        result = {"duration": e["duration"]["value"], "distance": e["distance"]["value"] / 1000}
         cache[key] = result
         with open(CACHE_FILE, "w") as f:
             json.dump(cache, f)
         return result
     except Exception as e:
-        print(f"[ERROR] Travel API failed: {e}")
+        print(f"[ERROR] Travel lookup failed: {e}")
         return None
 
 def get_diesel_price():
     try:
-        r = requests.get("https://www.globalpetrolprices.com/diesel_prices/")
-        soup = BeautifulSoup(r.text, "html.parser")
+        soup = BeautifulSoup(requests.get("https://www.globalpetrolprices.com/diesel_prices/").text, "html.parser")
         uk_row = soup.find("td", string=re.compile("United Kingdom")).find_parent("tr")
         return float(uk_row.find_all("td")[2].text.strip().replace("£", ""))
     except:
@@ -127,8 +88,10 @@ def extract_judges(text):
         dogs = re.search(r"dogs.*judge.*?:\s*([A-Z][a-z].+)", sub, re.I)
         bitches = re.search(r"bitches.*judge.*?:\s*([A-Z][a-z].+)", sub, re.I)
         all_in_one = re.search(r"judge.*?:\s*([A-Z][a-z].+)", sub, re.I)
-        if dogs: result["dogs"] = dogs.group(1).strip()
-        if bitches: result["bitches"] = bitches.group(1).strip()
+        if dogs:
+            result["dogs"] = dogs.group(1).strip()
+        if bitches:
+            result["bitches"] = bitches.group(1).strip()
         if not result and all_in_one:
             result["all"] = all_in_one.group(1).strip()
         break
@@ -144,17 +107,19 @@ def get_show_date(text):
     return None
 
 def jw_points(text):
-    if "open show" in text.lower():
+    txt = text.lower()
+    if "open show" in txt:
         return 1
-    if "championship show" in text.lower():
+    if "championship show" in txt:
         return 9
     return 0
 
-def find_clashes_and_combos(results, travel_cache):
+def find_clashes_and_combos(results):
     date_map = {}
     for show in results:
-        if show["date"]:
-            date_map.setdefault(show["date"], []).append(show)
+        date = show["date"]
+        if date:
+            date_map.setdefault(date, []).append(show)
 
     for same_day in date_map.values():
         if len(same_day) > 1:
@@ -176,9 +141,50 @@ def find_clashes_and_combos(results, travel_cache):
                 a.setdefault("combo_with", []).append(b["show"])
                 b.setdefault("combo_with", []).append(a["show"])
 
-def full_run():
-    links = fetch_aspx_links()
-    if not links:
+def should_include_class(name):
+    if any(c.lower() in name.lower() for c in CLASS_EXCLUSIONS):
+        return False
+    if "golden" in name.lower() or any(a.lower() in name.lower() for a in ALWAYS_INCLUDE_CLASS):
+        return True
+    return False
+
+async def download_schedule_playwright(show_url):
+    try:
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            page = await browser.new_page()
+            await page.goto(show_url)
+            await page.wait_for_load_state("networkidle")
+            async with page.expect_download() as download_info:
+                await page.click('input[type="submit"][value*="Schedule"]', timeout=5000)
+            download = await download_info.value
+            filename = download.suggested_filename
+            await download.save_as(filename)
+            await browser.close()
+            return filename
+    except Exception as e:
+        print(f"[ERROR] Playwright failed for {show_url}: {e}")
+        return None
+
+def fetch_aspx_links():
+    try:
+        soup = BeautifulSoup(requests.get("https://www.fossedata.co.uk/shows.aspx").text, "html.parser")
+        links = [
+            "https://www.fossedata.co.uk" + a.get("href")
+            for a in soup.select("a[href$='.aspx']")
+            if a.get("href") and "/shows/" in a.get("href").lower()
+        ]
+        with open("aspx_links.txt", "w") as f:
+            f.write("\n".join(links))
+        return links
+    except Exception as e:
+        print(f"Error fetching ASPX links: {e}")
+        return []
+
+async def full_run():
+    global travel_cache
+    urls = fetch_aspx_links()
+    if not urls:
         print("No show URLs found.")
         return []
 
@@ -187,52 +193,58 @@ def full_run():
         with open(CACHE_FILE, "r") as f:
             travel_cache = json.load(f)
 
-    results = []
-
-    for url in links:
-        pdf = download_schedule_playwright(url)
+    shows = []
+    for url in urls:
+        pdf = await download_schedule_playwright(url)
         if not pdf:
             continue
         text = extract_text_from_pdf(pdf)
         if "golden" not in text.lower():
+            print(f"Skipping {pdf} — no 'golden'")
             continue
         postcode = get_postcode(text)
-        drive = get_drive(HOME_POSTCODE, postcode, travel_cache) if postcode else None
-        cost = estimate_cost(drive["distance"], drive["duration"]) if drive else None
+        travel = get_drive(HOME_POSTCODE, postcode, travel_cache) if postcode else None
+        cost = estimate_cost(travel["distance"], travel["duration"]) if travel else None
         judges = extract_judges(text)
         show_date = get_show_date(text)
-
-        results.append({
+        shows.append({
             "show": url,
             "pdf": pdf,
             "date": show_date.isoformat() if show_date else None,
             "postcode": postcode,
-            "duration_hr": round(drive["duration"] / 3600, 2) if drive else None,
-            "distance_km": round(drive["distance"], 1) if drive else None,
+            "duration_hr": round(travel["duration"] / 3600, 2) if travel else None,
+            "distance_km": round(travel["distance"], 1) if travel else None,
             "cost_estimate": round(cost, 2) if cost else None,
             "points": jw_points(text),
             "judge": judges,
         })
 
-    find_clashes_and_combos(results, travel_cache)
+    find_clashes_and_combos(shows)
 
     with open("results.json", "w") as f:
-        json.dump(results, f, indent=2)
+        json.dump(shows, f, indent=2)
 
-    with open("results.csv", "w", newline="") as f:
-        writer = csv.writer(f)
+    with open("results.csv", "w", newline="") as csvfile:
+        writer = csv.writer(csvfile)
         writer.writerow([
             "Show", "Date", "Postcode", "Distance (km)", "Time (hr)",
             "Estimated Cost", "JW Points", "Golden Judge(s)", "Clash", "Combos"
         ])
-        for s in results:
-            judge_text = ", ".join(f"{k}: {v}" for k, v in s.get("judge", {}).items()) if s.get("judge") else ""
+        for s in shows:
+            judge = s.get("judge", {})
+            judge_text = ", ".join(f"{k}: {v}" for k, v in judge.items()) if judge else ""
             combos = "; ".join(s.get("combo_with", [])) if "combo_with" in s else ""
             writer.writerow([
-                s["show"], s["date"], s["postcode"], s.get("distance_km"),
-                s.get("duration_hr"), s.get("cost_estimate"), s["points"],
-                judge_text, "Yes" if s.get("clash") else "", combos
+                s["show"],
+                s["date"],
+                s["postcode"],
+                s.get("distance_km"),
+                s.get("duration_hr"),
+                s.get("cost_estimate"),
+                s["points"],
+                judge_text,
+                "Yes" if s.get("clash") else "",
+                combos
             ])
-
-    print(f"Processed {len(results)} shows with Golden Retriever classes.")
-    return results
+    print(f"Processed {len(shows)} shows with Golden Retriever classes.")
+    return shows
