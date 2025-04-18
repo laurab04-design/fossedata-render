@@ -24,7 +24,7 @@ except Exception as e:
 app = FastAPI()
 
 @app.get("/run")
-def trigger_run():
+async def trigger_run():
     from fossedata_core import full_run
-    result = full_run()
+    result = await full_run()
     return {"status": "completed", "shows": len(result)}
