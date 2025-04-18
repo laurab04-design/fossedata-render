@@ -172,7 +172,12 @@ async def download_schedule_playwright(show_url):
             page = await browser.new_page()
 
             # Console + guarded request‑failure logging
-            page.on("console", lambda msg: print("[PAGE LOG]", msg.text))
+            def on_request_failed(request):
+                try:
+                    print(f"[REQUEST FAILED] {request.url} -> {request.failure}")
+                except Exception as e:
+                    print(f"[REQUEST FAILED] {request.url} -> error inspecting failure: {e}")
+            page.on("console", lambda msg: print("[PAGE LOG]", msg.text())
             page.on("requestfailed", on_request_failed)
 
             # Navigate + restore cookies/storage
