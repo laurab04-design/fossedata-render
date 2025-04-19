@@ -260,7 +260,7 @@ if not os.path.exists(CACHE_DIR):
 async def download_schedule_playwright(show_url):
 # Define the cache filename based on the show URL
     # This ensures each show URL gets its own unique file
-    cache_filename = os.path.join(CACHE_DIR, f"{show_url.split('/')[-1]}.pdf")
+    cache_filename = os.path.join(CACHE_DIR, f"{show_url.split('/')[-1].replace('.aspx', '.pdf')}")
 
     # Check if the show has already been downloaded (cached)
     if os.path.exists(cache_filename):
