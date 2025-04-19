@@ -387,13 +387,17 @@ CACHE_DIR = "downloaded_pdfs"
 if not os.path.exists(CACHE_DIR):
     os.makedirs(CACHE_DIR, exist_ok=True)
     
-async def download_schedule_playwright(show_url, processed_shows):
-    # Check if the show has already been processed (shared cache)
+async def download_schedule_playwright(show_url):
+    processed_shows = load_processed_shows()
+    
     if is_show_processed(show_url, processed_shows):
-        print(f"[INFO] Skipping {show_url} — already processed.")
-        return None
+        cached_pdf_path = processed_shows[show_url]
+        if os.path.exists(cached_pdf_path):
+            print(f"[INFO] Skipping {show_url} — already processed.")
+            return cached_pdf_path
+        else:
+            print(f"[WARN] Cached file for {show_url} missing, re-downloading...")
 
-    # Define the cache filename based on the show URL
     cache_filename = os.path.join(CACHE_DIR, f"{show_url.split('/')[-1].replace('.aspx', '.pdf')}")
 
     # Check if the show has already been downloaded (cached)
