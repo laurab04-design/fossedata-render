@@ -234,15 +234,15 @@ async def download_schedule_playwright(show_url):
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
             page = await browser.new_page()
-        
+
+            # Block Google Analytics requests to clean up logs
+            await page.route("**/*", lambda route: route.abort() if "google-analytics.com" in route.request.url else route.continue_())
+            
             # Check for stored session (cookies, local storage) and load if available
             if Path("storage_state.json").exists():
                 await load_storage_state(page.context)
             else:
                 print("[INFO] No saved storage state found, starting fresh.")
-            
-            # Block Google Analytics requests to clean up logs
-            await page.route("**/*", lambda route: route.abort() if "google-analytics.com" in route.request.url else route.continue_())
            
             def on_request_failed(req):
                 try:
