@@ -89,6 +89,27 @@ def save_processed_shows(shows_data):
 # Function to check if the show has already been processed
 def is_show_processed(show_url, processed_shows):
     return show_url in processed_shows and isinstance(processed_shows[show_url], dict)
+# -------------------------------------------
+# Travel cache functions
+# ———————————————————————————————————————————
+travel_updated = False  # Global flag to track changes
+
+def load_travel_cache():
+    if Path("travel_cache.json").exists():
+        try:
+            with open("travel_cache.json", "r") as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"[WARN] Failed to load travel cache: {e}")
+    return {}
+
+def save_travel_cache(cache):
+    try:
+        with open("travel_cache.json", "w") as f:
+            json.dump(cache, f, indent=2)
+        print("[INFO] Travel cache saved.")
+    except Exception as e:
+        print(f"[ERROR] Failed to save travel cache: {e}")
 
 # ———————————————————————————————————————————
 # Configuration
@@ -586,4 +607,8 @@ async def full_run():
         print("[INFO] No shows processed — skipping Google Drive upload.")
 
     print(f"[INFO] Processed {len(shows)} shows with Golden Retriever classes.")
+
+        if travel_updated:
+        save_travel_cache(travel_cache)
+            
     return shows
