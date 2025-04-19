@@ -262,23 +262,43 @@ def jw_points(text):
 
 def find_clashes_and_combos(results):
     by_date = {}
+    missing_dates = []
+
     for s in results:
         d = s.get("date")
-        if d: by_date.setdefault(d, []).append(s)
+        if not isinstance(d, str):
+            missing_dates.append(s.get("show"))
+            continue
+        by_date.setdefault(d, []).append(s)
+
     for group in by_date.values():
-        if len(group)>1:
-            for s in group: s["clash"]=True
-    for i,a in enumerate(results):
-        if not a.get("postcode") or a.get("duration_hr",0)<=3: continue
-        for b in results[i+1:]:
-            if not b.get("postcode") or b.get("duration_hr",0)<=3: continue
-            da = datetime.datetime.fromisoformat(a["date"])
-            db = datetime.datetime.fromisoformat(b["date"])
-            if abs((da-db).days)==1:
+        if len(group) > 1:
+            for s in group:
+                s["clash"] = True
+
+    for i, a in enumerate(results):
+        if not a.get("postcode") or a.get("duration_hr", 0) <= 3:
+            continue
+        for b in results[i + 1:]:
+            if not b.get("postcode") or b.get("duration_hr", 0) <= 3:
+                continue
+            if not isinstance(a.get("date"), str) or not isinstance(b.get("date"), str):
+                continue
+            try:
+                da = datetime.datetime.fromisoformat(a["date"])
+                db = datetime.datetime.fromisoformat(b["date"])
+            except Exception:
+                continue
+            if abs((da - db).days) == 1:
                 inter = get_drive(a["postcode"], b["postcode"], travel_cache)
-                if inter and inter["duration"]<=75*60:
-                    a.setdefault("combo_with",[]).append(b["show"])
-                    b.setdefault("combo_with",[]).append(a["show"])
+                if inter and inter["duration"] <= 75 * 60:
+                    a.setdefault("combo_with", []).append(b["show"])
+                    b.setdefault("combo_with", []).append(a["show"])
+
+    if missing_dates:
+        with open("missing_dates.txt", "w") as f:
+            f.write("\n".join(missing_dates))
+        print(f"[WARN] {len(missing_dates)} shows skipped due to missing or invalid dates.")
 
 def should_include_class(name):
     name_l = name.lower()
