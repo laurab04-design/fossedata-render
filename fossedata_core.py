@@ -250,6 +250,8 @@ def fetch_aspx_links():
 # ———————————————————————————————————————————
 # Playwright download logic
 # ———————————————————————————————————————————
+Playwright download logic
+# ———————————————————————————————————————————
 # Define the cache directory to store downloaded PDF files
 CACHE_DIR = "downloaded_pdfs"
 
@@ -258,7 +260,15 @@ if not os.path.exists(CACHE_DIR):
     os.makedirs(CACHE_DIR, exist_ok=True)
     
 async def download_schedule_playwright(show_url):
-# Define the cache filename based on the show URL
+    
+    # Load the processed shows cache (the cache file where we store shows already processed)
+    processed_shows = load_processed_shows()
+    # Check if the show has already been processed
+    if is_show_processed(show_url, processed_shows):  # Check if the show has been processed
+        print(f"[INFO] Skipping {show_url} — already processed.")  # Log the skipped show
+        return None  # Skip processing this show and return None (no need to download)
+   
+    # Define the cache filename based on the show URL
     # This ensures each show URL gets its own unique file
     cache_filename = os.path.join(CACHE_DIR, f"{show_url.split('/')[-1].replace('.aspx', '.pdf')}")
 
@@ -324,6 +334,10 @@ async def download_schedule_playwright(show_url):
                 await save_storage_state(page)
                 await browser.close()
                 print(f"[INFO] Downloaded: {file_path}")
+
+                # Mark the show as processed and update the cache
+                processed_shows[show_url] = file_path  #  Add the processed show to the cache
+                save_processed_shows(processed_shows)
                 return file_path
 
             except Exception:
