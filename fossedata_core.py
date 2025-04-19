@@ -446,6 +446,7 @@ async def full_run():
 
         upload_to_drive("results.json", "application/json")
         upload_to_drive("results.csv", "text/csv")
+        upload_to_drive("processed_shows.json", "application/json")
     else:
         print("[INFO] No shows processed — skipping Google Drive upload.")
 
