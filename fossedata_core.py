@@ -33,24 +33,33 @@ drive_service = build("drive", "v3", credentials=credentials)
 
 def upload_to_drive(local_path, mime_type):
     fname = os.path.basename(local_path)
-    res = drive_service.files().list(
-        q=f"name='{fname}' and trashed=false",
-        spaces="drive",
-        fields="files(id)"
-    ).execute()
-    if res["files"]:
-        file_id = res["files"][0]["id"]
-        drive_service.files().update(
-            fileId=file_id,
-            media_body=MediaFileUpload(local_path, mimetype=mime_type)
+
+    if not os.path.exists(local_path):
+        print(f"[ERROR] File not found for upload: {local_path}")
+        return
+
+    try:
+        res = drive_service.files().list(
+            q=f"name='{fname}' and trashed=false",
+            spaces="drive",
+            fields="files(id)"
         ).execute()
-    else:
-        drive_service.files().create(
-            body={"name": fname},
-            media_body=MediaFileUpload(local_path, mimetype=mime_type),
-            fields="id"
-        ).execute()
-    print(f"[INFO] Uploaded {fname} to Google Drive.")
+        if res["files"]:
+            file_id = res["files"][0]["id"]
+            drive_service.files().update(
+                fileId=file_id,
+                media_body=MediaFileUpload(local_path, mimetype=mime_type)
+            ).execute()
+            print(f"[INFO] Updated {fname} on Google Drive.")
+        else:
+            drive_service.files().create(
+                body={"name": fname},
+                media_body=MediaFileUpload(local_path, mimetype=mime_type),
+                fields="id"
+            ).execute()
+            print(f"[INFO] Uploaded {fname} to Google Drive.")
+    except Exception as e:
+        print(f"[ERROR] Failed to upload {fname}: {e}")
 
 # ———————————————————————————————————————————
 # Caching functions
