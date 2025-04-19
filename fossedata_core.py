@@ -234,15 +234,18 @@ async def download_schedule_playwright(show_url):
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
             page = await browser.new_page()
-
+# Block Google Analytics requests to clean up logs
+            await page.route("**/*", lambda route: route.abort() if "google-analytics.com" in route.request.url else route.continue_())
+           
             def on_request_failed(req):
                 try:
                     print(f"[REQUEST FAILED] {req.url} -> {req.failure}")
                 except:
                     print(f"[REQUEST FAILED] {req.url} -> <no details>")
             page.on("requestfailed", on_request_failed)
-
-            await page.goto(show_url, wait_until="networkidle")
+            
+            # Set a timeout for page load (e.g., 30 seconds)
+            await page.goto(show_url, wait_until="networkidle", timeout=30000)  # 30 seconds timeout
             await load_storage_state(page.context)
             await page.evaluate("""() => {
                 const o = document.getElementById('cookiescript_injected_wrapper');
