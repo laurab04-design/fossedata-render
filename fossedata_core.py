@@ -282,6 +282,18 @@ def get_show_date(text):
             return None
     return None
 
+def get_show_date_from_title(aspx_url):
+    try:
+        r = requests.get(aspx_url, timeout=10)
+        soup = BeautifulSoup(r.text, "html.parser")
+        title = soup.title.string if soup.title else ""
+        m = re.search(r"on\s+([A-Za-z]+,\s+\d{1,2}\s+[A-Za-z]+\s+\d{4})", title)
+        if m:
+            return datetime.datetime.strptime(m.group(1), "%A, %d %B %Y").date()
+    except Exception as e:
+        print(f"[WARN] Failed to extract show date from title: {e}")
+    return None
+
 def jw_points(text):
     txt = text.lower()
     if "championship show" in txt: return 9
@@ -578,7 +590,7 @@ async def full_run():
         drive = get_drive(HOME_POSTCODE, pc, travel_cache) if pc else None
         cost = estimate_cost(drive["distance"], drive["duration"]) if drive else None
         judge = extract_judges(text)
-        dt = get_show_date(text)
+        dt = get_show_date(text) or get_show_date_from_title(url)
         shows.append({
             "show": url,
             "pdf": pdf,
