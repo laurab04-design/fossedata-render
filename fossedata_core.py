@@ -250,8 +250,6 @@ def fetch_aspx_links():
 # ———————————————————————————————————————————
 # Playwright download logic
 # ———————————————————————————————————————————
-Playwright download logic
-# ———————————————————————————————————————————
 # Define the cache directory to store downloaded PDF files
 CACHE_DIR = "downloaded_pdfs"
 
