@@ -325,7 +325,6 @@ async def download_schedule_playwright(show_url):
             
             # Set a timeout for page load (e.g., 30 seconds)
             await page.goto(show_url, wait_until="networkidle", timeout=30000)  # 30 seconds timeout
-            await load_storage_state(page.context)
             await page.evaluate("""() => {
                 const o = document.getElementById('cookiescript_injected_wrapper');
                 if (o) o.remove();
