@@ -457,32 +457,52 @@ async def download_schedule_playwright(show_url, processed_shows):
                 return file_path
 
             except Exception:
-    print("[WARN] download click failed — falling back to POST…")
-    form_data = await page.evaluate("""() => {
-        const data = {};
-        for (const [k,v] of new FormData(document.querySelector('#aspnetForm'))) {
-            data[k] = v;
-        }
-        return data;
-    }""")
-    resp = await page.context.request.post(show_url, data=form_data)
-    ct = resp.headers.get("content-type", "")
-    if resp.ok and "application/pdf" in ct:
-        pdfb = await resp.body()
-        out = show_url.rsplit("/",1)[-1].replace(".aspx",".pdf")
-        with open(out, "wb") as f: f.write(pdfb)
-        await save_storage_state(page)
-        await browser.close()
-        print(f"[INFO] Fallback PDF saved: {out}")
+                print("[WARN] download click failed — falling back to POST…")
+                form_data = await page.evaluate("""() => {
+                    const data = {};
+                    for (const [k,v] of new FormData(document.querySelector('#aspnetForm'))) {
+                        data[k] = v;
+                    }
+                    return data;
+                }""")
+                resp = await page.context.request.post(show_url, data=form_data)
+                ct = resp.headers.get("content-type", "")
+                if resp.ok and "application/pdf" in ct:
+                    pdfb = await resp.body()
+                    out = show_url.rsplit("/", 1)[-1].replace(".aspx", ".pdf")
+                    with open(out, "wb") as f:
+                        f.write(pdfb)
+                    await save_storage_state(page)
+                    await browser.close()
+                    print(f"[INFO] Fallback PDF saved: {out}")
 
-        processed_shows[show_url] = out
-        save_processed_shows(processed_shows)
-        return out
-    else:
-        print(f"[ERROR] Fallback POST failed: {resp.status} {ct}")
-        await browser.close()
-        return None
+                    # Create show_data now so we can reuse it later
+                    text = extract_text_from_pdf(out)
+                    pc = get_postcode(text)
+                    drive = get_drive(HOME_POSTCODE, pc, travel_cache) if pc else None
+                    cost = estimate_cost(drive["distance"], drive["duration"]) if drive else None
+                    judge = extract_judges(text)
+                    dt = get_show_date(text)
 
+                    show_data = {
+                        "show": show_url,
+                        "pdf": out,
+                        "date": dt.isoformat() if dt else None,
+                        "postcode": pc,
+                        "duration_hr": round(drive["duration"]/3600, 2) if drive else None,
+                        "distance_km": round(drive["distance"], 1) if drive else None,
+                        "cost_estimate": round(cost, 2) if cost else None,
+                        "points": jw_points(text),
+                        "judge": judge,
+                    }
+
+                    processed_shows[show_url] = show_data
+                    save_processed_shows(processed_shows)
+                    return out
+                else:
+                    print(f"[ERROR] Fallback POST failed: {resp.status} {ct}")
+                    await browser.close()
+                    return None
     except Exception as e:
         print(f"[ERROR] Playwright failed for {show_url}: {e}")
         return None
