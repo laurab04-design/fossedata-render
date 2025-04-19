@@ -135,6 +135,12 @@ OVERNIGHT_THRESHOLD_HOURS = float(os.environ.get("OVERNIGHT_THRESHOLD_HOURS", 3)
 OVERNIGHT_COST = float(os.environ.get("OVERNIGHT_COST", 100))
 ALWAYS_INCLUDE_CLASS = os.environ.get("ALWAYS_INCLUDE_CLASS", "").split(",")
 CLASS_EXCLUSIONS = [x.strip() for x in os.environ.get("DOG_CLASS_EXCLUSIONS", "").split(",")]
+# Define the cache directory to store downloaded PDF files
+CACHE_DIR = "downloaded_pdfs"
+
+# Ensure the cache directory exists
+if not os.path.exists(CACHE_DIR):
+    os.makedirs(CACHE_DIR, exist_ok=True)
 
 # ———————————————————————————————————————————
 # Hardcoded Kennel Club breed list (simplified, lowercase, realistic show formats)
