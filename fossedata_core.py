@@ -429,7 +429,8 @@ def fetch_aspx_links():
 # ———————————————————————————————————————————
 # Playwright download logic
 # ———————————————————————————————————————————
-#async def download_schedule_playwright(show_url, processed_shows):
+
+async def download_schedule_playwright(show_url, processed_shows):
     if is_show_processed(show_url, processed_shows):
         cached_pdf_path = processed_shows[show_url]
         if os.path.exists(cached_pdf_path):
