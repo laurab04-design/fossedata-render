@@ -266,66 +266,44 @@ CACHE_DIR = "downloaded_pdfs"
 if not os.path.exists(CACHE_DIR):
     os.makedirs(CACHE_DIR, exist_ok=True)
     
-async def download_schedule_playwright(show_url):
-    # Load the processed shows cache
-    processed_shows = load_processed_shows()
-
-    # Use show_url as the key
+async def download_schedule_playwright(show_url, processed_shows):
+    # Check if the show has already been processed (shared cache)
     if is_show_processed(show_url, processed_shows):
         print(f"[INFO] Skipping {show_url} — already processed.")
-        return None  # Don't reprocess
+        return None
 
-    # Define the expected cached PDF filename
+    # Define the cache filename based on the show URL
     cache_filename = os.path.join(CACHE_DIR, f"{show_url.split('/')[-1].replace('.aspx', '.pdf')}")
 
+    # Check if the show has already been downloaded (cached)
     if os.path.exists(cache_filename):
-        print(f"[INFO] Skipping {show_url} - PDF already downloaded.")
-        # Still mark it as processed if missing in cache
-        processed_shows[show_url] = cache_filename
+        print(f"[INFO] Skipping {show_url} - already downloaded.")
+        processed_shows[show_url] = cache_filename  # Ensure it's marked in the shared cache
         save_processed_shows(processed_shows)
         return cache_filename
-    
+
     try:
         print(f"[INFO] Launching Playwright for: {show_url}")
         async with async_playwright() as p:
             browser = await p.chromium.launch(headless=True)
             page = await browser.new_page()
 
-            # Block Google Analytics requests to clean up logs
-            await page.route("**/*", lambda route: route.abort() if "google-analytics.com" in route.request.url else route.continue_())
+            # Block unwanted requests to speed things up
+            await page.route("**/*", lambda route: route.abort() if any(ext in route.request.url for ext in [
+                "google-analytics.com", "images", ".css", ".woff2", ".woff", ".js", "trackers"
+            ]) else route.continue_())
 
-            # Block images to speed up page load
-            await page.route("**/*", lambda route: route.abort() if "images" in route.request.url else route.continue_())
-
-            # Block CSS files to avoid unnecessary loading
-            await page.route("**/*.css", lambda route: route.abort())
-
-            # Block fonts to speed up loading (Web Open Font Format files)
-            await page.route("**/*.woff2", lambda route: route.abort())
-            await page.route("**/*.woff", lambda route: route.abort())
-
-            # Block JavaScript files if they aren’t essential for loading the data
-            await page.route("**/*.js", lambda route: route.abort())
-
-            # Block unnecessary tracking or ad-related pixels
-            await page.route("**/*trackers*", lambda route: route.abort())
-            
-            # Check for stored session (cookies, local storage) and load if available
+            # Load cookies/local storage if available
             if Path("storage_state.json").exists():
                 await load_storage_state(page.context)
                 print("[INFO] Loaded session state.")
             else:
                 print("[INFO] No saved storage state found, starting fresh.")
-           
-            def on_request_failed(req):
-                try:
-                    print(f"[REQUEST FAILED] {req.url} -> {req.failure}")
-                except:
-                    print(f"[REQUEST FAILED] {req.url} -> <no details>")
-            page.on("requestfailed", on_request_failed)
-            
-            # Set a timeout for page load (e.g., 30 seconds)
-            await page.goto(show_url, wait_until="networkidle", timeout=30000)  # 30 seconds timeout
+
+            page.on("requestfailed", lambda req: print(f"[REQUEST FAILED] {req.url} -> {req.failure or '<no details>'}"))
+
+            await page.goto(show_url, wait_until="networkidle", timeout=30000)
+            await load_storage_state(page.context)
             await page.evaluate("""() => {
                 const o = document.getElementById('cookiescript_injected_wrapper');
                 if (o) o.remove();
@@ -342,8 +320,8 @@ async def download_schedule_playwright(show_url):
                 await browser.close()
                 print(f"[INFO] Downloaded: {file_path}")
 
-                # Mark the show as processed and update the cache
-                processed_shows[show_url] = file_path  #  Add the processed show to the cache
+                # Mark as processed in shared cache
+                processed_shows[show_url] = file_path
                 save_processed_shows(processed_shows)
                 return file_path
 
@@ -365,6 +343,9 @@ async def download_schedule_playwright(show_url):
                     await save_storage_state(page)
                     await browser.close()
                     print(f"[INFO] Fallback PDF saved: {out}")
+
+                    processed_shows[show_url] = out
+                    save_processed_shows(processed_shows)
                     return out
                 else:
                     print(f"[ERROR] Fallback POST failed: {resp.status} {ct}")
