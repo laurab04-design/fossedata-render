@@ -53,6 +53,28 @@ def upload_to_drive(local_path, mime_type):
     print(f"[INFO] Uploaded {fname} to Google Drive.")
 
 # ———————————————————————————————————————————
+# Caching functions
+# ———————————————————————————————————————————
+# Define the cache file to store previously processed shows
+CACHE_FILE = "processed_shows.json"
+
+# Load the existing processed shows cache (if any)
+def load_processed_shows():
+    if Path(CACHE_FILE).exists():
+        with open(CACHE_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+# Save the processed show data to the cache
+def save_processed_shows(shows_data):
+    with open(CACHE_FILE, "w") as f:
+        json.dump(shows_data, f, indent=2)
+
+# Function to check if the show has already been processed
+def is_show_processed(show_url, processed_shows):
+    return show_url in processed_shows
+
+# ———————————————————————————————————————————
 # Configuration
 # ———————————————————————————————————————————
 HOME_POSTCODE = os.environ.get("HOME_POSTCODE", "YO8 9NA")
@@ -228,7 +250,23 @@ def fetch_aspx_links():
 # ———————————————————————————————————————————
 # Playwright download logic
 # ———————————————————————————————————————————
+# Define the cache directory to store downloaded PDF files
+CACHE_DIR = "downloaded_pdfs"
+
+# Ensure the cache directory exists
+if not os.path.exists(CACHE_DIR):
+    os.makedirs(CACHE_DIR, exist_ok=True)
+    
 async def download_schedule_playwright(show_url):
+# Define the cache filename based on the show URL
+    # This ensures each show URL gets its own unique file
+    cache_filename = os.path.join(CACHE_DIR, f"{show_url.split('/')[-1]}.pdf")
+
+    # Check if the show has already been downloaded (cached)
+    if os.path.exists(cache_filename):
+        print(f"[INFO] Skipping {show_url} - already downloaded.")
+        return cache_filename  # Return the cached file name
+    
     try:
         print(f"[INFO] Launching Playwright for: {show_url}")
         async with async_playwright() as p:
@@ -244,6 +282,7 @@ async def download_schedule_playwright(show_url):
             # Check for stored session (cookies, local storage) and load if available
             if Path("storage_state.json").exists():
                 await load_storage_state(page.context)
+                print("[INFO] Loaded session state.")
             else:
                 print("[INFO] No saved storage state found, starting fresh.")
            
@@ -267,11 +306,12 @@ async def download_schedule_playwright(show_url):
                     await page.click("#ctl00_ContentPlaceHolder_btnDownloadSchedule", timeout=30000)
                 download = await dl.value
                 fname = download.suggested_filename
-                await download.save_as(fname)
+                file_path = os.path.join(CACHE_DIR, fname)
+                await download.save_as(file_path)
                 await save_storage_state(page)
                 await browser.close()
-                print(f"[INFO] Downloaded: {fname}")
-                return fname
+                print(f"[INFO] Downloaded: {file_path}")
+                return file_path
 
             except Exception:
                 print("[WARN] download click failed — falling back to POST…")
