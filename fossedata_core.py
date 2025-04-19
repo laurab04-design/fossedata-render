@@ -587,8 +587,8 @@ async def full_run():
         with open("results.csv", "w", newline="") as cf:
             w = csv.writer(cf)
             w.writerow([
-                "Show","Date","Postcode","Distance (km)","Time (hr)",
-                "Estimated Cost","JW Points","Golden Judge(s)","Clash","Combos"
+                "Show", "Date", "Postcode", "Distance (km)", "Time (hr)",
+                "Estimated Cost", "JW Points", "Golden Judge(s)", "Clash", "Combos"
             ])
             for s in shows:
                 jt = ", ".join(f"{k}: {v}" for k, v in (s.get("judge") or {}).items())
@@ -608,7 +608,7 @@ async def full_run():
 
     print(f"[INFO] Processed {len(shows)} shows with Golden Retriever classes.")
 
-        if travel_updated:
+    if travel_updated:
         save_travel_cache(travel_cache)
-            
+
     return shows
