@@ -64,12 +64,61 @@ OVERNIGHT_COST = float(os.environ.get("OVERNIGHT_COST", 100))
 ALWAYS_INCLUDE_CLASS = os.environ.get("ALWAYS_INCLUDE_CLASS", "").split(",")
 CLASS_EXCLUSIONS = [x.strip() for x in os.environ.get("DOG_CLASS_EXCLUSIONS", "").split(",")]
 
-KC_BREEDS = set()
-with open("kc_breeds.txt", "r") as f:
-    for line in f:
-        b = line.strip().lower()
-        if b and b != "golden retriever":
-            KC_BREEDS.add(b)
+KC_BREEDS = {
+    'affenpinscher', 'afghan hound', 'airedale terrier', 'akita', 'alaskan malamute',
+    'american akita', 'american cocker spaniel', 'anatolian shepherd dog', 'australian cattle dog',
+    'australian shepherd', 'australian silky terrier', 'australian terrier', 'azawakh',
+    'barbet', 'basenji', 'basset fauve de bretagne', 'basset griffon vendeen (grand)',
+    'basset griffon vendeen (petit)', 'basset hound', 'bavarian mountain hound', 'beagle',
+    'bearded collie', 'beauceron', 'bedlington terrier', 'belgian shepherd dog (groenendael)',
+    'belgian shepherd dog (laekenois)', 'belgian shepherd dog (malinois)',
+    'belgian shepherd dog (tervueren)', 'bergamasco sheepdog', 'berger picard',
+    'bernese mountain dog', 'bichon frise', 'black and tan coonhound', 'black russian terrier',
+    'bloodhound', 'boerboel', 'bolognese', 'border collie', 'border terrier', 'borzoi',
+    'boston terrier', 'bouvier des flandres', 'boxer', 'bracco italiano', 'briard',
+    'brittany', 'bull mastiff', 'bull terrier', 'bull terrier (miniature)', 'bulldog',
+    'cairn terrier', 'canaan dog', 'canadian eskimo dog', 'cane corso', 'cavalier king charles spaniel',
+    'central asian shepherd dog', 'cesky terrier', 'chesapeake bay retriever', 'chihuahua (long coat)',
+    'chihuahua (smooth coat)', 'chinese crested', 'chinese shar pei', 'chow chow', 'clumber spaniel',
+    'cocker spaniel', 'collie (rough)', 'collie (smooth)', 'cotton de tulear', 'curly coated retriever',
+    'dachshund (long haired)', 'dachshund (miniature long haired)', 'dachshund (miniature smooth haired)',
+    'dachshund (miniature wire haired)', 'dachshund (smooth haired)', 'dachshund (wire haired)',
+    'dalmatian', 'dandie dinmont terrier', 'deerhound', 'dobermann', 'dogue de bordeaux',
+    'english setter', 'english springer spaniel', 'english toy terrier (black & tan)', 'entlebucher mountain dog',
+    'eurasier', 'field spaniel', 'finnish lapphund', 'finnish spitz', 'flat coated retriever',
+    'french bulldog', 'german pinscher', 'german shepherd dog', 'german shorthaired pointer',
+    'german spitz (klein)', 'german spitz (mittel)', 'german wirehaired pointer',
+    'giant schnauzer', 'glen of imaal terrier', 'golden retriever',  # will be filtered out below
+    'gordon setter', 'grand bleu de gascogne', 'greenland dog', 'greyhound', 'griffon bruxellois',
+    'hamiltonstovare', 'havanese', 'hungarian puli', 'hungarian vizsla', 'hungarian wire haired vizsla',
+    'ibizan hound', 'icelandic sheepdog', 'irish red and white setter', 'irish setter',
+    'irish terrier', 'irish water spaniel', 'irish wolfhound', 'italian greyhound', 'japanese akita inu',
+    'japanese chin', 'japanese shiba inu', 'japanese spitz', 'kangal dog', 'keeshond',
+    'kerry blue terrier', 'king charles spaniel', 'klee kai', 'komondor', 'kooikerhondje',
+    'korean jindo', 'kuvasz', 'labrador retriever', 'lakeland terrier', 'leonberger',
+    'lhasa apso', 'lowchen (little lion dog)', 'lundehund', 'malamute', 'maltese', 'manchester terrier',
+    'mastiff', 'mexican hairless (intermediate)', 'mexican hairless (miniature)',
+    'mexican hairless (standard)', 'miniature pinscher', 'miniature schnauzer', 'neapolitan mastiff',
+    'newfoundland', 'norfolk terrier', 'norwegian buhund', 'norwegian elkhound',
+    'norwegian lundehund', 'norwich terrier', 'old english sheepdog', 'otterhound',
+    'papillon', 'parson russell terrier', 'pekingese', 'perro de agua espanol', 'petit basset griffon vendeen',
+    'pharaoh hound', 'picardy sheepdog', 'pinscher', 'pointer', 'polish lowland sheepdog',
+    'pomeranian', 'poodle (miniature)', 'poodle (standard)', 'poodle (toy)', 'portuguese podengo',
+    'portuguese pointer', 'portuguese water dog', 'presa canario', 'pug', 'puli', 'pyrenean mountain dog',
+    'pyrenean sheepdog (long haired)', 'rafeiro do alentejo', 'rhodesian ridgeback',
+    'rottweiler', 'russian black terrier', 'russian toy', 'saint bernard', 'saluki',
+    'samoyed', 'schipperke', 'schnauzer', 'scottish terrier', 'sealyham terrier',
+    'setter', 'shar pei', 'shetland sheepdog', 'shiba inu', 'shih tzu', 'siberian husky',
+    'skye terrier', 'sloughi', 'small munsterlander', 'soft coated wheaten terrier',
+    'spaniel', 'spanish mastiff', 'spanish water dog', 'spinone italiano', 'staffordshire bull terrier',
+    'sussex spaniel', 'swedish vallhund', 'taiwan dog', 'tibetan mastiff', 'tibetan spaniel',
+    'tibetan terrier', 'vizsla', 'weimaraner', 'welsh corgi (cardigan)', 'welsh corgi (pembroke)',
+    'welsh springer spaniel', 'welsh terrier', 'west highland white terrier', 'whippet',
+    'white swiss shepherd dog', 'wire fox terrier', 'wire haired vizsla', 'yorkshire terrier'
+}
+
+# Remove golden retriever if it slipped in
+KC_BREEDS.discard("golden retriever")
 
 async def save_storage_state(page, state_file="storage_state.json"):
     storage = await page.context.storage_state()
