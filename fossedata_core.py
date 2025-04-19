@@ -381,7 +381,7 @@ async def full_run():
         if is_show_processed(url, processed_shows):
             print(f"[INFO] Skipping {url} — already processed (early skip).")
             continue
-        pdf = await download_schedule_playwright(url)
+        pdf = await download_schedule_playwright(url, processed_shows)
         if not pdf:
             continue
         text = extract_text_from_pdf(pdf)
