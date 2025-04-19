@@ -281,7 +281,6 @@ def fetch_aspx_links():
         r = requests.get("https://www.fossedata.co.uk/shows/Shows-To-Enter.aspx")
         soup = BeautifulSoup(r.text, "html.parser")
         links = []
-
         for a in soup.select("a[href$='.aspx']"):
             href = a["href"]
             if not href.startswith("/shows/") or href in (
@@ -296,7 +295,7 @@ def fetch_aspx_links():
             if "golden" in link_text:
                 links.append(full_url)
             else:
-                # Check if it's a single-breed show and not for golden retrievers
+                # Skip single-breed shows not for Golden Retrievers
                 breed_matches = [breed for breed in KC_BREEDS if breed in link_text]
                 if len(breed_matches) == 1 and "golden" not in breed_matches:
                     print(f"[INFO] Skipping single-breed show: {link_text}")
@@ -307,7 +306,6 @@ def fetch_aspx_links():
         with open("aspx_links.txt", "w") as f:
             f.write("\n".join(links))
         return links
-
     except Exception as e:
         print(f"[ERROR] Error fetching ASPX links: {e}")
         return []
