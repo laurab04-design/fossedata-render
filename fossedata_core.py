@@ -100,6 +100,46 @@ ALWAYS_INCLUDE_CLASS = os.environ.get("ALWAYS_INCLUDE_CLASS", "").split(",")
 CLASS_EXCLUSIONS = [x.strip() for x in os.environ.get("DOG_CLASS_EXCLUSIONS", "").split(",")]
 
 # ———————————————————————————————————————————
+# Hardcoded Kennel Club breed list (simplified, lowercase, realistic show formats)
+# ———————————————————————————————————————————
+KC_BREEDS = {
+    "affenpinscher", "afghan hound", "airedale terrier", "akita", "alaskan malamute", "american cocker spaniel",
+    "anatolian shepherd dog", "australian cattle dog", "australian shepherd", "australian silky terrier",
+    "australian terrier", "azawakh", "barbet", "basenji", "basset fauve de bretagne", "basset griffon vendeen",
+    "basset hound", "beagle", "bearded collie", "beauceron", "bedlington terrier", "belgian shepherd dog",
+    "bergamasco", "berger picard", "bernese mountain dog", "bichon frise", "bloodhound", "border collie",
+    "border terrier", "borzoi", "boston terrier", "bouvier des flandres", "boxer", "bracco italiano",
+    "briard", "briquet griffon vendeen", "british bulldog", "brittany", "bull terrier", "bullmastiff",
+    "cairn terrier", "canaan dog", "canadian eskimo dog", "cane corso", "cardigan welsh corgi", "cavalier king charles spaniel",
+    "cesky terrier", "chesapeake bay retriever", "chihuahua", "chinese crested", "chow chow", "clumber spaniel",
+    "cocker spaniel", "collie", "coton de tulear", "curly coated retriever", "dachshund", "dalmatian",
+    "dandie dinmont terrier", "deerhound", "dobermann", "dogue de bordeaux", "english setter",
+    "english springer spaniel", "english toy terrier", "eurasier", "field spaniel", "finnish lapphund",
+    "finnish spitz", "flatcoated retriever", "fox terrier", "foxhound", "french bulldog", "german longhaired pointer",
+    "german shepherd dog", "german shorthaired pointer", "german spitz", "german wirehaired pointer", "giant schnauzer",
+    "glen of imaal terrier", "golden retriever", "gordon setter", "great dane", "greenland dog", "greyhound",
+    "griffon bruxellois", "hamiltonstovare", "havanese", "hovawart", "hungarian kuvasz", "hungarian puli",
+    "hungarian vizsla", "hungarian wirehaired vizsla", "irish red and white setter", "irish setter",
+    "irish terrier", "irish water spaniel", "irish wolfhound", "italian greyhound", "japanese akita inu",
+    "japanese chin", "japanese shiba inu", "japanese spitz", "keeshond", "kerry blue terrier", "king charles spaniel",
+    "komondor", "kromfohrlander", "kuvasz", "labrador retriever", "lakeland terrier", "lancashire heeler",
+    "leonberger", "lhasa apso", "lowchen", "malinois", "maltese", "manchester terrier", "mastiff",
+    "mexican hairless", "miniature bull terrier", "miniature pinscher", "miniature schnauzer", "neapolitan mastiff",
+    "newfoundland", "norfolk terrier", "norwegian buhund", "norwegian elkhound", "norwegian lundehund",
+    "norwich terrier", "nova scotia duck tolling retriever", "old english sheepdog", "otterhound", "papillon",
+    "parson russell terrier", "pekingese", "pharaoh hound", "picardy spaniel", "pinscher", "pointer",
+    "polish lowland sheepdog", "pomeranian", "poodle", "portuguese podengo", "portuguese pointer",
+    "portuguese water dog", "presa canario", "pug", "puli", "pumi", "pyrenean mountain dog", "pyrenean sheepdog",
+    "rafeiro do alentejo", "retriever", "rhodesian ridgeback", "rottweiler", "russian black terrier",
+    "saluki", "samoyed", "schipperke", "schnauzer", "scottish terrier", "sealyham terrier", "setter",
+    "shar pei", "sheltie", "shih tzu", "siberian husky", "skye terrier", "sloughi", "small munsterlander",
+    "soft coated wheaten terrier", "spaniel", "spanish mastiff", "spanish water dog", "spinone italiano",
+    "st bernard", "staffordshire bull terrier", "sussex spaniel", "swedish lapphund", "swedish vallhund",
+    "tibetan mastiff", "tibetan spaniel", "tibetan terrier", "toy poodle", "vizsla", "weimaraner", "welsh springer spaniel",
+    "welsh terrier", "west highland white terrier", "whippet", "wirehaired vizsla", "xoloitzcuintli", "yorkshire terrier"
+}
+
+# ———————————————————————————————————————————
 # Playwright storage persistence
 # ———————————————————————————————————————————
 async def save_storage_state(page, state_file="storage_state.json"):
@@ -241,17 +281,33 @@ def fetch_aspx_links():
         r = requests.get("https://www.fossedata.co.uk/shows/Shows-To-Enter.aspx")
         soup = BeautifulSoup(r.text, "html.parser")
         links = []
+
         for a in soup.select("a[href$='.aspx']"):
             href = a["href"]
-            if href.startswith("/shows/") and href not in (
+            if not href.startswith("/shows/") or href in (
                 "/shows/Shows-To-Enter.aspx",
                 "/shows/Shows-Starting-Soon.aspx"
             ):
-                links.append("https://www.fossedata.co.uk" + href)
-        print(f"[INFO] Found {len(links)} show links.")
+                continue
+
+            full_url = "https://www.fossedata.co.uk" + href
+            link_text = a.get_text(strip=True).lower()
+
+            if "golden" in link_text:
+                links.append(full_url)
+            else:
+                # Check if it's a single-breed show and not for golden retrievers
+                breed_matches = [breed for breed in KC_BREEDS if breed in link_text]
+                if len(breed_matches) == 1 and "golden" not in breed_matches:
+                    print(f"[INFO] Skipping single-breed show: {link_text}")
+                    continue
+                links.append(full_url)
+
+        print(f"[INFO] Found {len(links)} filtered show links.")
         with open("aspx_links.txt", "w") as f:
             f.write("\n".join(links))
         return links
+
     except Exception as e:
         print(f"[ERROR] Error fetching ASPX links: {e}")
         return []
