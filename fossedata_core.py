@@ -425,26 +425,29 @@ async def full_run():
 
     find_clashes_and_combos(shows)
 
-    with open("results.json", "w") as f:
-        json.dump(shows, f, indent=2)
-    with open("results.csv", "w", newline="") as cf:
-        w = csv.writer(cf)
-        w.writerow([
-            "Show","Date","Postcode","Distance (km)","Time (hr)",
-            "Estimated Cost","JW Points","Golden Judge(s)","Clash","Combos"
-        ])
-        for s in shows:
-            jt = ", ".join(f"{k}: {v}" for k, v in (s.get("judge") or {}).items())
-            combos = "; ".join(s.get("combo_with", []))
+    if shows:
+        with open("results.json", "w") as f:
+            json.dump(shows, f, indent=2)
+        with open("results.csv", "w", newline="") as cf:
+            w = csv.writer(cf)
             w.writerow([
-                s["show"], s["date"], s["postcode"],
-                s.get("distance_km"), s.get("duration_hr"),
-                s.get("cost_estimate"), s["points"],
-                jt, "Yes" if s.get("clash") else "", combos
+                "Show","Date","Postcode","Distance (km)","Time (hr)",
+                "Estimated Cost","JW Points","Golden Judge(s)","Clash","Combos"
             ])
+            for s in shows:
+                jt = ", ".join(f"{k}: {v}" for k, v in (s.get("judge") or {}).items())
+                combos = "; ".join(s.get("combo_with", []))
+                w.writerow([
+                    s["show"], s["date"], s["postcode"],
+                    s.get("distance_km"), s.get("duration_hr"),
+                    s.get("cost_estimate"), s["points"],
+                    jt, "Yes" if s.get("clash") else "", combos
+                ])
 
-    upload_to_drive("results.json", "application/json")
-    upload_to_drive("results.csv", "text/csv")
+        upload_to_drive("results.json", "application/json")
+        upload_to_drive("results.csv", "text/csv")
+    else:
+        print("[INFO] No shows processed — skipping Google Drive upload.")
 
     print(f"[INFO] Processed {len(shows)} shows with Golden Retriever classes.")
     return shows
