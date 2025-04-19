@@ -237,6 +237,9 @@ async def download_schedule_playwright(show_url):
 
             # Block Google Analytics requests to clean up logs
             await page.route("**/*", lambda route: route.abort() if "google-analytics.com" in route.request.url else route.continue_())
+
+            # Block images to speed up page load
+            await page.route("**/*", lambda route: route.abort() if "images" in route.request.url else route.continue_())
             
             # Check for stored session (cookies, local storage) and load if available
             if Path("storage_state.json").exists():
