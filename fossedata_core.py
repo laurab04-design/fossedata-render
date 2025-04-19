@@ -103,40 +103,55 @@ CLASS_EXCLUSIONS = [x.strip() for x in os.environ.get("DOG_CLASS_EXCLUSIONS", ""
 # Hardcoded Kennel Club breed list (simplified, lowercase, realistic show formats)
 # ———————————————————————————————————————————
 KC_BREEDS = {
-    "affenpinscher", "afghan hound", "airedale terrier", "akita", "alaskan malamute", "american cocker spaniel",
-    "anatolian shepherd dog", "australian cattle dog", "australian shepherd", "australian silky terrier",
-    "australian terrier", "azawakh", "barbet", "basenji", "basset fauve de bretagne", "basset griffon vendeen",
-    "basset hound", "beagle", "bearded collie", "beauceron", "bedlington terrier", "belgian shepherd dog",
-    "bergamasco", "berger picard", "bernese mountain dog", "bichon frise", "bloodhound", "border collie",
-    "border terrier", "borzoi", "boston terrier", "bouvier des flandres", "boxer", "bracco italiano",
-    "briard", "briquet griffon vendeen", "british bulldog", "brittany", "bull terrier", "bullmastiff",
-    "cairn terrier", "canaan dog", "canadian eskimo dog", "cane corso", "cardigan welsh corgi", "cavalier king charles spaniel",
-    "cesky terrier", "chesapeake bay retriever", "chihuahua", "chinese crested", "chow chow", "clumber spaniel",
-    "cocker spaniel", "collie", "coton de tulear", "curly coated retriever", "dachshund", "dalmatian",
-    "dandie dinmont terrier", "deerhound", "dobermann", "dogue de bordeaux", "english setter",
-    "english springer spaniel", "english toy terrier", "eurasier", "field spaniel", "finnish lapphund",
-    "finnish spitz", "flatcoated retriever", "fox terrier", "foxhound", "french bulldog", "german longhaired pointer",
-    "german shepherd dog", "german shorthaired pointer", "german spitz", "german wirehaired pointer", "giant schnauzer",
-    "glen of imaal terrier", "golden retriever", "gordon setter", "great dane", "greenland dog", "greyhound",
-    "griffon bruxellois", "hamiltonstovare", "havanese", "hovawart", "hungarian kuvasz", "hungarian puli",
-    "hungarian vizsla", "hungarian wirehaired vizsla", "irish red and white setter", "irish setter",
-    "irish terrier", "irish water spaniel", "irish wolfhound", "italian greyhound", "japanese akita inu",
-    "japanese chin", "japanese shiba inu", "japanese spitz", "keeshond", "kerry blue terrier", "king charles spaniel",
-    "komondor", "kromfohrlander", "kuvasz", "labrador retriever", "lakeland terrier", "lancashire heeler",
-    "leonberger", "lhasa apso", "lowchen", "malinois", "maltese", "manchester terrier", "mastiff",
-    "mexican hairless", "miniature bull terrier", "miniature pinscher", "miniature schnauzer", "neapolitan mastiff",
-    "newfoundland", "norfolk terrier", "norwegian buhund", "norwegian elkhound", "norwegian lundehund",
-    "norwich terrier", "nova scotia duck tolling retriever", "old english sheepdog", "otterhound", "papillon",
-    "parson russell terrier", "pekingese", "pharaoh hound", "picardy spaniel", "pinscher", "pointer",
-    "polish lowland sheepdog", "pomeranian", "poodle", "portuguese podengo", "portuguese pointer",
-    "portuguese water dog", "presa canario", "pug", "puli", "pumi", "pyrenean mountain dog", "pyrenean sheepdog",
-    "rafeiro do alentejo", "retriever", "rhodesian ridgeback", "rottweiler", "russian black terrier",
-    "saluki", "samoyed", "schipperke", "schnauzer", "scottish terrier", "sealyham terrier", "setter",
-    "shar pei", "sheltie", "shih tzu", "siberian husky", "skye terrier", "sloughi", "small munsterlander",
-    "soft coated wheaten terrier", "spaniel", "spanish mastiff", "spanish water dog", "spinone italiano",
-    "st bernard", "staffordshire bull terrier", "sussex spaniel", "swedish lapphund", "swedish vallhund",
-    "tibetan mastiff", "tibetan spaniel", "tibetan terrier", "toy poodle", "vizsla", "weimaraner", "welsh springer spaniel",
-    "welsh terrier", "west highland white terrier", "whippet", "wirehaired vizsla", "xoloitzcuintli", "yorkshire terrier"
+    "affenpinscher", "afghan hound", "airedale terrier", "akita", "alaskan malamute",
+    "american cocker spaniel", "australian cattle dog", "australian shepherd",
+    "australian silky terrier", "basenji", "basset griffon vendeen", "basset hound",
+    "beagle", "bearded collie", "beauceron", "bedlington terrier", "belgian shepherd dog",
+    "bernese mountain dog", "bichon frise", "bloodhound", "border collie", "border terrier",
+    "borzoi", "boston terrier", "bouvier des flandres", "boxer", "bracco italiano",
+    "briard", "brittany", "briquet griffon vendeen", "bull terrier", "bull terrier miniature",
+    "bulldog", "bullmastiff", "cairn terrier", "canaan dog", "canadian eskimo dog",
+    "cavalier king charles spaniel", "cesky terrier", "chesapeake bay retriever",
+    "chihuahua", "chow chow", "clumber spaniel", "cocker spaniel", "collie rough",
+    "collie smooth", "curly coated retriever", "dachshund miniature long haired",
+    "dachshund miniature smooth haired", "dachshund miniature wire haired",
+    "dachshund long haired", "dachshund smooth haired", "dachshund wire haired",
+    "dalmatian", "dandie dinmont terrier", "deerhound", "dobermann", "english setter",
+    "english springer spaniel", "english toy terrier", "field spaniel", "finnish lapphund",
+    "finnish spitz", "flatcoated retriever", "fox terrier", "french bulldog",
+    "german pinscher", "german shepherd dog", "german shorthaired pointer",
+    "german spitz klein", "german spitz mittel", "glen of imaal terrier", "golden retriever",
+    "gordon setter", "great dane", "greyhound", "griffon bruxellois", "hamiltonstovare",
+    "harrier", "heeler", "hound", "hovawart", "hungarian kuvasz", "hungarian puli",
+    "hungarian vizsla", "hungarian wire haired vizsla", "irish red and white setter",
+    "irish setter", "irish terrier", "irish water spaniel", "irish wolfhound",
+    "italian greyhound", "jack russell terrier", "japanese akita inu",
+    "japanese chin", "japanese shiba inu", "kerry blue terrier", "king charles spaniel",
+    "klee kai", "komondor", "kooikerhondje", "kuvasz", "lagotto romagnolo",
+    "labrador retriever", "lakeland terrier", "leonberger", "lhasa apso",
+    "lowchen", "maltese", "manchester terrier", "mastiff", "miniature pinscher",
+    "miniature schnauzer", "neapolitan mastiff", "newfoundland", "norfolk terrier",
+    "norwegian buhund", "norwegian elkhound", "norwegian lundehund",
+    "norwich terrier", "old english sheepdog", "otterhound", "papillon",
+    "parson russell terrier", "pekingese", "perro de presa canario", "pharaoh hound",
+    "pointer", "polish lowland sheepdog", "pomeranian", "poodle miniature",
+    "poodle standard", "poodle toy", "portuguese podengo", "portuguese water dog",
+    "pug", "pyrenean mountain dog", "pyrenean sheepdog", "redbone coonhound",
+    "retriever curly coated", "retriever flatcoated", "retriever golden",
+    "retriever labrador", "rhodesian ridgeback", "rottweiler", "russian black terrier",
+    "saluki", "samoyed", "schipperke", "schnauzer", "scottish terrier",
+    "sealyham terrier", "setter english", "setter gordon", "setter irish",
+    "setter irish red and white", "shar pei", "shetland sheepdog", "shih tzu",
+    "siberian husky", "skye terrier", "sloughi", "soft coated wheaten terrier",
+    "spaniel american cocker", "spaniel clumber", "spaniel cocker",
+    "spaniel field", "spaniel irish water", "spaniel sussex", "spaniel welsh springer",
+    "spaniel tibetan", "spinone italiano", "staffordshire bull terrier", "swedish vallhund",
+    "terrier", "thai ridgeback", "tibetan mastiff", "tibetan spaniel",
+    "tibetan terrier", "toy", "vizsla hungarian", "vizsla wire haired hungarian",
+    "volpino italiano", "weimaraner", "welsh corgi cardigan",
+    "welsh corgi pembroke", "welsh springer spaniel", "welsh terrier",
+    "west highland white terrier", "whippet", "wire haired fox terrier", "xoloitzcuintle",
+    "yorkshire terrier"
 }
 
 # ———————————————————————————————————————————
@@ -298,7 +313,16 @@ def fetch_aspx_links():
             if "golden" in link_text or "golden" in url_text:
                 links.append(full_url)
                 continue
-
+            # Create a unified string for matching: cleaned visible text + cleaned URL text
+            link_text = a.text.lower().strip()
+            url_text = (
+                href.split("/")[-1]
+                .replace(".aspx", "")
+                .replace("-", " ")
+                .replace("_", " ")
+                .lower()
+                .strip()
+            )
             # Otherwise check for single-breed shows we want to skip
             text_for_matching = f"{link_text} {url_text}"
             breed_matches = [breed for breed in KC_BREEDS if breed in text_for_matching]
