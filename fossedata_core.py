@@ -549,19 +549,31 @@ async def full_run():
     
     shows = []
     for url in urls:
-         # skip early if already processed
+        # skip early if already processed
         if is_show_processed(url, processed_shows):
             print(f"[INFO] Skipping {url} — already processed (early skip).")
             continue
-        pdf = await download_schedule_playwright(url, processed_shows)
+
+        try:
+            pdf = await asyncio.wait_for(download_schedule_playwright(url, processed_shows), timeout=60)
+        except asyncio.TimeoutError:
+            print(f"[TIMEOUT] Skipping {url} — download took too long.")
+            processed_shows[url] = {"error": "timeout"}
+            save_processed_shows(processed_shows)
+            if len(processed_shows) % 30 == 0:
+                upload_to_drive("processed_shows.json", "application/json")
+            continue
+
         if not pdf:
             continue
+
         text = extract_text_from_pdf(pdf)
         if "golden" not in text.lower():
             print(f"[INFO] Skipping {pdf} — no 'golden'")
             processed_shows[url] = pdf  # Mark as processed anyway
             save_processed_shows(processed_shows)
             continue
+
         pc = get_postcode(text)
         drive = get_drive(HOME_POSTCODE, pc, travel_cache) if pc else None
         cost = estimate_cost(drive["distance"], drive["duration"]) if drive else None
