@@ -543,6 +543,19 @@ async def download_schedule_playwright(show_url, processed_shows):
 # ———————————————————————————————————————————
 # full_run orchestrator
 # ———————————————————————————————————————————
+# Save the processed show data to the cache
+def save_processed_shows(shows_data):
+    try:
+        with open("processed_shows.json", "w") as f:
+            json.dump(shows_data, f, indent=2)
+        print(f"[INFO] Saved cache with {len(shows_data)} shows.")
+        print(f"[DEBUG] Writing to: {os.path.abspath('processed_shows.json')}")
+        print(f"[DEBUG] File exists after write? {Path('processed_shows.json').exists()}")
+    except Exception as e:
+        print(f"[ERROR] Failed to save processed cache: {e}")
+
+
+# full_run orchestrator
 async def full_run():
     global travel_cache
 
@@ -552,16 +565,14 @@ async def full_run():
         return []
 
     travel_cache = {}
-    if Path(CACHE_FILE).exists():
-        with open(CACHE_FILE, "r") as f:
+    if Path("travel_cache.json").exists():
+        with open("travel_cache.json", "r") as f:
             travel_cache = json.load(f)
 
-    # load processed shows cache once
     processed_shows = load_processed_shows()
-    
     shows = []
+
     for url in urls:
-        # skip early if already processed
         if is_show_processed(url, processed_shows):
             print(f"[INFO] Skipping {url} — already processed (early skip).")
             continue
@@ -572,8 +583,7 @@ async def full_run():
             print(f"[TIMEOUT] Skipping {url} — download took too long.")
             processed_shows[url] = {"error": "timeout"}
             save_processed_shows(processed_shows)
-            if len(processed_shows) % 30 == 0:
-                upload_to_drive("processed_shows.json", "application/json")
+            upload_to_drive("processed_shows.json", "application/json")
             continue
 
         if not pdf:
@@ -582,8 +592,9 @@ async def full_run():
         text = extract_text_from_pdf(pdf)
         if "golden" not in text.lower():
             print(f"[INFO] Skipping {pdf} — no 'golden'")
-            processed_shows[url] = pdf  # Mark as processed anyway
+            processed_shows[url] = pdf
             save_processed_shows(processed_shows)
+            upload_to_drive("processed_shows.json", "application/json")
             continue
 
         pc = get_postcode(text)
@@ -603,11 +614,19 @@ async def full_run():
             "judge": judge,
         })
 
+        save_processed_shows(processed_shows)
+        upload_to_drive("processed_shows.json", "application/json")
+
     find_clashes_and_combos(shows)
+
+    # Final upload of processed cache no matter what
+    save_processed_shows(processed_shows)
+    upload_to_drive("processed_shows.json", "application/json")
 
     if shows:
         with open("results.json", "w") as f:
             json.dump(shows, f, indent=2)
+
         with open("results.csv", "w", newline="") as cf:
             w = csv.writer(cf)
             w.writerow([
@@ -626,13 +645,11 @@ async def full_run():
 
         upload_to_drive("results.json", "application/json")
         upload_to_drive("results.csv", "text/csv")
-        upload_to_drive("processed_shows.json", "application/json")
     else:
-        print("[INFO] No shows processed — skipping Google Drive upload.")
-
-    print(f"[INFO] Processed {len(shows)} shows with Golden Retriever classes.")
+        print("[INFO] No Golden Retriever shows processed — skipping results upload.")
 
     if travel_updated:
         save_travel_cache(travel_cache)
 
+    print(f"[INFO] Processed {len(shows)} shows with Golden Retriever classes.")
     return shows
