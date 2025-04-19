@@ -278,6 +278,19 @@ async def download_schedule_playwright(show_url):
 
             # Block images to speed up page load
             await page.route("**/*", lambda route: route.abort() if "images" in route.request.url else route.continue_())
+
+            # Block CSS files to avoid unnecessary loading
+            await page.route("**/*.css", lambda route: route.abort())
+
+            # Block fonts to speed up loading (Web Open Font Format files)
+            await page.route("**/*.woff2", lambda route: route.abort())
+            await page.route("**/*.woff", lambda route: route.abort())
+
+            # Block JavaScript files if they aren’t essential for loading the data
+            await page.route("**/*.js", lambda route: route.abort())
+
+            # Block unnecessary tracking or ad-related pixels
+            await page.route("**/*trackers*", lambda route: route.abort())
             
             # Check for stored session (cookies, local storage) and load if available
             if Path("storage_state.json").exists():
