@@ -387,8 +387,7 @@ CACHE_DIR = "downloaded_pdfs"
 if not os.path.exists(CACHE_DIR):
     os.makedirs(CACHE_DIR, exist_ok=True)
     
-async def download_schedule_playwright(show_url):
-    processed_shows = load_processed_shows()
+async def download_schedule_playwright(show_url, processed_shows):
     
     if is_show_processed(show_url, processed_shows):
         cached_pdf_path = processed_shows[show_url]
