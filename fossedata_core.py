@@ -1,4 +1,3 @@
-# fossedata_core.py — FULL VERSION
 import os
 import re
 import csv
@@ -56,6 +55,7 @@ def upload_to_drive(local_path, mime_type):
 HOME_POSTCODE = os.environ.get("HOME_POSTCODE", "YO8 9NA")
 GOOGLE_MAPS_API_KEY = os.environ.get("GOOGLE_MAPS_API_KEY")
 CACHE_FILE = "travel_cache.json"
+PROCESSED_FILE = "processed_urls.json"
 DOG_DOB = datetime.datetime.strptime(os.environ.get("DOG_DOB", "2024-05-15"), "%Y-%m-%d")
 DOG_NAME = os.environ.get("DOG_NAME", "Delia")
 MPG = float(os.environ.get("MPG", 40))
@@ -64,9 +64,6 @@ OVERNIGHT_COST = float(os.environ.get("OVERNIGHT_COST", 100))
 ALWAYS_INCLUDE_CLASS = os.environ.get("ALWAYS_INCLUDE_CLASS", "").split(",")
 CLASS_EXCLUSIONS = [x.strip() for x in os.environ.get("DOG_CLASS_EXCLUSIONS", "").split(",")]
 
-# ———————————————————————————————————————————
-# Breed List — Exclude single-breed shows
-# ———————————————————————————————————————————
 KC_BREEDS = set()
 with open("kc_breeds.txt", "r") as f:
     for line in f:
@@ -74,9 +71,6 @@ with open("kc_breeds.txt", "r") as f:
         if b and b != "golden retriever":
             KC_BREEDS.add(b)
 
-# ———————————————————————————————————————————
-# Playwright storage
-# ———————————————————————————————————————————
 async def save_storage_state(page, state_file="storage_state.json"):
     storage = await page.context.storage_state()
     with open(state_file, "w") as f:
@@ -92,9 +86,6 @@ async def load_storage_state(context, state_file="storage_state.json"):
     else:
         print("[INFO] No storage state found, starting fresh.")
 
-# ———————————————————————————————————————————
-# Utility Functions
-# ———————————————————————————————————————————
 def extract_text_from_pdf(path):
     try:
         with pdfplumber.open(path) as pdf:
@@ -203,9 +194,6 @@ def find_clashes_and_combos(results):
                     a.setdefault("combo_with", []).append(b["show"])
                     b.setdefault("combo_with", []).append(a["show"])
 
-# ———————————————————————————————————————————
-# Fetch show links — exclude accessory pages
-# ———————————————————————————————————————————
 def fetch_aspx_links():
     try:
         print("[INFO] Fetching show links from Shows‑To‑Enter only…")
@@ -232,9 +220,6 @@ def fetch_aspx_links():
         print(f"[ERROR] Error fetching ASPX links: {e}")
         return []
 
-# ———————————————————————————————————————————
-# PDF scraping with Playwright & POST fallback
-# ———————————————————————————————————————————
 async def download_schedule_playwright(show_url):
     try:
         print(f"[INFO] Launching Playwright for: {show_url}")
@@ -296,9 +281,6 @@ async def download_schedule_playwright(show_url):
         print(f"[ERROR] Playwright failed for {show_url}: {e}")
         return None
 
-# ———————————————————————————————————————————
-# Orchestrator
-# ———————————————————————————————————————————
 async def full_run():
     global travel_cache
     urls = fetch_aspx_links()
@@ -311,8 +293,17 @@ async def full_run():
         with open(CACHE_FILE, "r") as f:
             travel_cache = json.load(f)
 
+    if not Path(PROCESSED_FILE).exists():
+        with open(PROCESSED_FILE, "w") as f:
+            json.dump([], f)
+    with open(PROCESSED_FILE, "r") as f:
+        processed_urls = set(json.load(f))
+
     shows = []
     for url in urls:
+        if url in processed_urls:
+            print(f"[SKIP] Already processed: {url}")
+            continue
         pdf = await download_schedule_playwright(url)
         if not pdf:
             continue
@@ -336,6 +327,10 @@ async def full_run():
             "points": jw_points(text),
             "judge": judge,
         })
+
+        processed_urls.add(url)
+        with open(PROCESSED_FILE, "w") as f:
+            json.dump(list(processed_urls), f)
 
     find_clashes_and_combos(shows)
 
