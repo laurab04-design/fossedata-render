@@ -1,3 +1,4 @@
+# fossedata_core.py — FULL VERSION
 import os
 import re
 import csv
@@ -55,7 +56,6 @@ def upload_to_drive(local_path, mime_type):
 HOME_POSTCODE = os.environ.get("HOME_POSTCODE", "YO8 9NA")
 GOOGLE_MAPS_API_KEY = os.environ.get("GOOGLE_MAPS_API_KEY")
 CACHE_FILE = "travel_cache.json"
-PROCESSED_FILE = "processed_urls.json"
 DOG_DOB = datetime.datetime.strptime(os.environ.get("DOG_DOB", "2024-05-15"), "%Y-%m-%d")
 DOG_NAME = os.environ.get("DOG_NAME", "Delia")
 MPG = float(os.environ.get("MPG", 40))
@@ -64,62 +64,61 @@ OVERNIGHT_COST = float(os.environ.get("OVERNIGHT_COST", 100))
 ALWAYS_INCLUDE_CLASS = os.environ.get("ALWAYS_INCLUDE_CLASS", "").split(",")
 CLASS_EXCLUSIONS = [x.strip() for x in os.environ.get("DOG_CLASS_EXCLUSIONS", "").split(",")]
 
+# ———————————————————————————————————————————
+# Breed List — Exclude single-breed shows
+# ———————————————————————————————————————————
 KC_BREEDS = {
     'affenpinscher', 'afghan hound', 'airedale terrier', 'akita', 'alaskan malamute',
     'american akita', 'american cocker spaniel', 'anatolian shepherd dog', 'australian cattle dog',
     'australian shepherd', 'australian silky terrier', 'australian terrier', 'azawakh',
-    'barbet', 'basenji', 'basset fauve de bretagne', 'basset griffon vendeen (grand)',
-    'basset griffon vendeen (petit)', 'basset hound', 'bavarian mountain hound', 'beagle',
-    'bearded collie', 'beauceron', 'bedlington terrier', 'belgian shepherd dog (groenendael)',
-    'belgian shepherd dog (laekenois)', 'belgian shepherd dog (malinois)',
-    'belgian shepherd dog (tervueren)', 'bergamasco sheepdog', 'berger picard',
-    'bernese mountain dog', 'bichon frise', 'black and tan coonhound', 'black russian terrier',
-    'bloodhound', 'boerboel', 'bolognese', 'border collie', 'border terrier', 'borzoi',
-    'boston terrier', 'bouvier des flandres', 'boxer', 'bracco italiano', 'briard',
-    'brittany', 'bull mastiff', 'bull terrier', 'bull terrier (miniature)', 'bulldog',
-    'cairn terrier', 'canaan dog', 'canadian eskimo dog', 'cane corso', 'cavalier king charles spaniel',
-    'central asian shepherd dog', 'cesky terrier', 'chesapeake bay retriever', 'chihuahua (long coat)',
-    'chihuahua (smooth coat)', 'chinese crested', 'chinese shar pei', 'chow chow', 'clumber spaniel',
-    'cocker spaniel', 'collie (rough)', 'collie (smooth)', 'cotton de tulear', 'curly coated retriever',
-    'dachshund (long haired)', 'dachshund (miniature long haired)', 'dachshund (miniature smooth haired)',
-    'dachshund (miniature wire haired)', 'dachshund (smooth haired)', 'dachshund (wire haired)',
-    'dalmatian', 'dandie dinmont terrier', 'deerhound', 'dobermann', 'dogue de bordeaux',
-    'english setter', 'english springer spaniel', 'english toy terrier (black & tan)', 'entlebucher mountain dog',
-    'eurasier', 'field spaniel', 'finnish lapphund', 'finnish spitz', 'flat coated retriever',
+    'barbet', 'basenji', 'basset fauve de bretagne', 'basset griffon vendeen', 'basset hound',
+    'bavarian mountain hound', 'beagle', 'bearded collie', 'beauceron', 'bedlington terrier',
+    'belgian shepherd dog', 'bergamasco sheepdog', 'berger picard', 'bernese mountain dog',
+    'bichon frise', 'black and tan coonhound', 'black russian terrier', 'bloodhound', 'boerboel',
+    'bolognese', 'border collie', 'border terrier', 'borzoi', 'boston terrier',
+    'bouvier des flandres', 'boxer', 'bracco italiano', 'briard', 'brittany', 'bull mastiff',
+    'bull terrier', 'bulldog', 'cairn terrier', 'canaan dog', 'canadian eskimo dog', 'cane corso',
+    'cavalier king charles spaniel', 'central asian shepherd dog', 'cesky terrier',
+    'chesapeake bay retriever', 'chihuahua', 'chinese crested', 'chinese shar pei', 'chow chow',
+    'clumber spaniel', 'cocker spaniel', 'collie', 'cotton de tulear', 'curly coated retriever',
+    'dachshund', 'dalmatian', 'dandie dinmont terrier', 'deerhound', 'dobermann', 'dogue de bordeaux',
+    'english setter', 'english springer spaniel', 'english toy terrier', 'entlebucher mountain dog',
+    'eurasier', 'field spaniel', 'finnish lapphund', 'finnish spitz', 'flatcoated retriever',
     'french bulldog', 'german pinscher', 'german shepherd dog', 'german shorthaired pointer',
-    'german spitz (klein)', 'german spitz (mittel)', 'german wirehaired pointer',
-    'giant schnauzer', 'glen of imaal terrier', 'golden retriever',  # will be filtered out below
+    'german spitz', 'german wirehaired pointer', 'giant schnauzer', 'glen of imaal terrier',
     'gordon setter', 'grand bleu de gascogne', 'greenland dog', 'greyhound', 'griffon bruxellois',
     'hamiltonstovare', 'havanese', 'hungarian puli', 'hungarian vizsla', 'hungarian wire haired vizsla',
     'ibizan hound', 'icelandic sheepdog', 'irish red and white setter', 'irish setter',
-    'irish terrier', 'irish water spaniel', 'irish wolfhound', 'italian greyhound', 'japanese akita inu',
-    'japanese chin', 'japanese shiba inu', 'japanese spitz', 'kangal dog', 'keeshond',
-    'kerry blue terrier', 'king charles spaniel', 'klee kai', 'komondor', 'kooikerhondje',
-    'korean jindo', 'kuvasz', 'labrador retriever', 'lakeland terrier', 'leonberger',
-    'lhasa apso', 'lowchen (little lion dog)', 'lundehund', 'malamute', 'maltese', 'manchester terrier',
-    'mastiff', 'mexican hairless (intermediate)', 'mexican hairless (miniature)',
-    'mexican hairless (standard)', 'miniature pinscher', 'miniature schnauzer', 'neapolitan mastiff',
+    'irish terrier', 'irish water spaniel', 'irish wolfhound', 'italian greyhound',
+    'japanese akita inu', 'japanese chin', 'japanese shiba inu', 'japanese spitz', 'kangal dog',
+    'keeshond', 'kerry blue terrier', 'king charles spaniel', 'klee kai', 'komondor', 'kooikerhondje',
+    'korean jindo', 'kuvasz', 'labrador retriever', 'lakeland terrier', 'leonberger', 'lhasa apso',
+    'lowchen', 'lundehund', 'malamute', 'maltese', 'manchester terrier', 'mastiff',
+    'mexican hairless', 'miniature pinscher', 'miniature schnauzer', 'neapolitan mastiff',
     'newfoundland', 'norfolk terrier', 'norwegian buhund', 'norwegian elkhound',
     'norwegian lundehund', 'norwich terrier', 'old english sheepdog', 'otterhound',
-    'papillon', 'parson russell terrier', 'pekingese', 'perro de agua espanol', 'petit basset griffon vendeen',
-    'pharaoh hound', 'picardy sheepdog', 'pinscher', 'pointer', 'polish lowland sheepdog',
-    'pomeranian', 'poodle (miniature)', 'poodle (standard)', 'poodle (toy)', 'portuguese podengo',
-    'portuguese pointer', 'portuguese water dog', 'presa canario', 'pug', 'puli', 'pyrenean mountain dog',
-    'pyrenean sheepdog (long haired)', 'rafeiro do alentejo', 'rhodesian ridgeback',
+    'papillon', 'parson russell terrier', 'pekingese', 'perro de agua espanol',
+    'petit basset griffon vendeen', 'pharaoh hound', 'picardy sheepdog', 'pinscher', 'pointer',
+    'polish lowland sheepdog', 'pomeranian', 'poodle', 'portuguese podengo',
+    'portuguese pointer', 'portuguese water dog', 'presa canario', 'pug', 'puli',
+    'pyrenean mountain dog', 'pyrenean sheepdog', 'rafeiro do alentejo', 'rhodesian ridgeback',
     'rottweiler', 'russian black terrier', 'russian toy', 'saint bernard', 'saluki',
     'samoyed', 'schipperke', 'schnauzer', 'scottish terrier', 'sealyham terrier',
     'setter', 'shar pei', 'shetland sheepdog', 'shiba inu', 'shih tzu', 'siberian husky',
     'skye terrier', 'sloughi', 'small munsterlander', 'soft coated wheaten terrier',
-    'spaniel', 'spanish mastiff', 'spanish water dog', 'spinone italiano', 'staffordshire bull terrier',
-    'sussex spaniel', 'swedish vallhund', 'taiwan dog', 'tibetan mastiff', 'tibetan spaniel',
-    'tibetan terrier', 'vizsla', 'weimaraner', 'welsh corgi (cardigan)', 'welsh corgi (pembroke)',
-    'welsh springer spaniel', 'welsh terrier', 'west highland white terrier', 'whippet',
-    'white swiss shepherd dog', 'wire fox terrier', 'wire haired vizsla', 'yorkshire terrier'
+    'spaniel', 'spanish mastiff', 'spanish water dog', 'spinone italiano',
+    'staffordshire bull terrier', 'sussex spaniel', 'swedish vallhund', 'taiwan dog',
+    'tibetan mastiff', 'tibetan spaniel', 'tibetan terrier', 'vizsla', 'weimaraner',
+    'welsh corgi', 'welsh springer spaniel', 'welsh terrier', 'west highland white terrier',
+    'whippet', 'white swiss shepherd dog', 'wire fox terrier', 'wire haired vizsla',
+    'yorkshire terrier'
 }
 
-# Remove golden retriever if it slipped in
 KC_BREEDS.discard("golden retriever")
 
+# ———————————————————————————————————————————
+# Playwright storage
+# ———————————————————————————————————————————
 async def save_storage_state(page, state_file="storage_state.json"):
     storage = await page.context.storage_state()
     with open(state_file, "w") as f:
@@ -135,6 +134,9 @@ async def load_storage_state(context, state_file="storage_state.json"):
     else:
         print("[INFO] No storage state found, starting fresh.")
 
+# ———————————————————————————————————————————
+# Utility Functions
+# ———————————————————————————————————————————
 def extract_text_from_pdf(path):
     try:
         with pdfplumber.open(path) as pdf:
@@ -243,6 +245,9 @@ def find_clashes_and_combos(results):
                     a.setdefault("combo_with", []).append(b["show"])
                     b.setdefault("combo_with", []).append(a["show"])
 
+# ———————————————————————————————————————————
+# Fetch show links — exclude accessory pages
+# ———————————————————————————————————————————
 def fetch_aspx_links():
     try:
         print("[INFO] Fetching show links from Shows‑To‑Enter only…")
@@ -269,6 +274,9 @@ def fetch_aspx_links():
         print(f"[ERROR] Error fetching ASPX links: {e}")
         return []
 
+# ———————————————————————————————————————————
+# PDF scraping with Playwright & POST fallback
+# ———————————————————————————————————————————
 async def download_schedule_playwright(show_url):
     try:
         print(f"[INFO] Launching Playwright for: {show_url}")
@@ -330,6 +338,9 @@ async def download_schedule_playwright(show_url):
         print(f"[ERROR] Playwright failed for {show_url}: {e}")
         return None
 
+# ———————————————————————————————————————————
+# Orchestrator
+# ———————————————————————————————————————————
 async def full_run():
     global travel_cache
     urls = fetch_aspx_links()
@@ -342,17 +353,8 @@ async def full_run():
         with open(CACHE_FILE, "r") as f:
             travel_cache = json.load(f)
 
-    if not Path(PROCESSED_FILE).exists():
-        with open(PROCESSED_FILE, "w") as f:
-            json.dump([], f)
-    with open(PROCESSED_FILE, "r") as f:
-        processed_urls = set(json.load(f))
-
     shows = []
     for url in urls:
-        if url in processed_urls:
-            print(f"[SKIP] Already processed: {url}")
-            continue
         pdf = await download_schedule_playwright(url)
         if not pdf:
             continue
@@ -376,10 +378,6 @@ async def full_run():
             "points": jw_points(text),
             "judge": judge,
         })
-
-        processed_urls.add(url)
-        with open(PROCESSED_FILE, "w") as f:
-            json.dump(list(processed_urls), f)
 
     find_clashes_and_combos(shows)
 
