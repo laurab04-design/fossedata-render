@@ -70,18 +70,25 @@ CACHE_FILE = "processed_shows.json"
 # Load the existing processed shows cache (if any)
 def load_processed_shows():
     if Path(CACHE_FILE).exists():
-        with open(CACHE_FILE, "r") as f:
-            return json.load(f)
+        try:
+            with open(CACHE_FILE, "r") as f:
+                return json.load(f)
+        except Exception as e:
+            print(f"[WARN] Failed to load processed cache: {e}")
     return {}
 
 # Save the processed show data to the cache
 def save_processed_shows(shows_data):
-    with open(CACHE_FILE, "w") as f:
-        json.dump(shows_data, f, indent=2)
+    try:
+        with open(CACHE_FILE, "w") as f:
+            json.dump(shows_data, f, indent=2)
+        print(f"[INFO] Saved cache with {len(shows_data)} shows.")
+    except Exception as e:
+        print(f"[ERROR] Failed to save processed cache: {e}")
 
 # Function to check if the show has already been processed
 def is_show_processed(show_url, processed_shows):
-    return show_url in processed_shows
+    return show_url in processed_shows and isinstance(processed_shows[show_url], dict)
 
 # ———————————————————————————————————————————
 # Configuration
@@ -450,31 +457,31 @@ async def download_schedule_playwright(show_url, processed_shows):
                 return file_path
 
             except Exception:
-                print("[WARN] download click failed — falling back to POST…")
-                form_data = await page.evaluate("""() => {
-                    const data = {};
-                    for (const [k,v] of new FormData(document.querySelector('#aspnetForm'))) {
-                        data[k] = v;
-                    }
-                    return data;
-                }""")
-                resp = await page.context.request.post(show_url, data=form_data)
-                ct = resp.headers.get("content-type", "")
-                if resp.ok and "application/pdf" in ct:
-                    pdfb = await resp.body()
-                    out = show_url.rsplit("/",1)[-1].replace(".aspx",".pdf")
-                    with open(out, "wb") as f: f.write(pdfb)
-                    await save_storage_state(page)
-                    await browser.close()
-                    print(f"[INFO] Fallback PDF saved: {out}")
+    print("[WARN] download click failed — falling back to POST…")
+    form_data = await page.evaluate("""() => {
+        const data = {};
+        for (const [k,v] of new FormData(document.querySelector('#aspnetForm'))) {
+            data[k] = v;
+        }
+        return data;
+    }""")
+    resp = await page.context.request.post(show_url, data=form_data)
+    ct = resp.headers.get("content-type", "")
+    if resp.ok and "application/pdf" in ct:
+        pdfb = await resp.body()
+        out = show_url.rsplit("/",1)[-1].replace(".aspx",".pdf")
+        with open(out, "wb") as f: f.write(pdfb)
+        await save_storage_state(page)
+        await browser.close()
+        print(f"[INFO] Fallback PDF saved: {out}")
 
-                    processed_shows[show_url] = out
-                    save_processed_shows(processed_shows)
-                    return out
-                else:
-                    print(f"[ERROR] Fallback POST failed: {resp.status} {ct}")
-                    await browser.close()
-                    return None
+        processed_shows[show_url] = out
+        save_processed_shows(processed_shows)
+        return out
+    else:
+        print(f"[ERROR] Fallback POST failed: {resp.status} {ct}")
+        await browser.close()
+        return None
 
     except Exception as e:
         print(f"[ERROR] Playwright failed for {show_url}: {e}")
