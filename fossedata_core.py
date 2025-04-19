@@ -1,4 +1,3 @@
-# fossedata_core.py — FULL VERSION
 import os
 import re
 import csv
@@ -16,15 +15,16 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
 # ———————————————————————————————————————————
-# Decode Google Drive creds & initialise
+# Decode & write Google service account creds
 # ———————————————————————————————————————————
 creds_b64 = os.environ.get("GOOGLE_SERVICE_ACCOUNT_BASE64")
 if creds_b64:
     with open("credentials.json", "wb") as f:
         f.write(base64.b64decode(creds_b64))
 else:
-    print("[ERROR] GOOGLE_SERVICE_ACCOUNT_BASE64 not set.")
+    print("GOOGLE_SERVICE_ACCOUNT_BASE64 is not set.")
 
+# Build Drive client
 SCOPES = ["https://www.googleapis.com/auth/drive.file"]
 credentials = service_account.Credentials.from_service_account_file(
     "credentials.json", scopes=SCOPES
@@ -34,7 +34,9 @@ drive_service = build("drive", "v3", credentials=credentials)
 def upload_to_drive(local_path, mime_type):
     fname = os.path.basename(local_path)
     res = drive_service.files().list(
-        q=f"name='{fname}' and trashed=false", spaces="drive", fields="files(id)"
+        q=f"name='{fname}' and trashed=false",
+        spaces="drive",
+        fields="files(id)"
     ).execute()
     if res["files"]:
         file_id = res["files"][0]["id"]
@@ -56,7 +58,9 @@ def upload_to_drive(local_path, mime_type):
 HOME_POSTCODE = os.environ.get("HOME_POSTCODE", "YO8 9NA")
 GOOGLE_MAPS_API_KEY = os.environ.get("GOOGLE_MAPS_API_KEY")
 CACHE_FILE = "travel_cache.json"
-DOG_DOB = datetime.datetime.strptime(os.environ.get("DOG_DOB", "2024-05-15"), "%Y-%m-%d")
+DOG_DOB = datetime.datetime.strptime(
+    os.environ.get("DOG_DOB", "2024-05-15"), "%Y-%m-%d"
+)
 DOG_NAME = os.environ.get("DOG_NAME", "Delia")
 MPG = float(os.environ.get("MPG", 40))
 OVERNIGHT_THRESHOLD_HOURS = float(os.environ.get("OVERNIGHT_THRESHOLD_HOURS", 3))
@@ -65,59 +69,7 @@ ALWAYS_INCLUDE_CLASS = os.environ.get("ALWAYS_INCLUDE_CLASS", "").split(",")
 CLASS_EXCLUSIONS = [x.strip() for x in os.environ.get("DOG_CLASS_EXCLUSIONS", "").split(",")]
 
 # ———————————————————————————————————————————
-# Breed List — Exclude single-breed shows
-# ———————————————————————————————————————————
-KC_BREEDS = {
-    'affenpinscher', 'afghan hound', 'airedale terrier', 'akita', 'alaskan malamute',
-    'american akita', 'american cocker spaniel', 'anatolian shepherd dog', 'australian cattle dog',
-    'australian shepherd', 'australian silky terrier', 'australian terrier', 'azawakh',
-    'barbet', 'basenji', 'basset fauve de bretagne', 'basset griffon vendeen', 'basset hound',
-    'bavarian mountain hound', 'beagle', 'bearded collie', 'beauceron', 'bedlington terrier',
-    'belgian shepherd dog', 'bergamasco sheepdog', 'berger picard', 'bernese mountain dog',
-    'bichon frise', 'black and tan coonhound', 'black russian terrier', 'bloodhound', 'boerboel',
-    'bolognese', 'border collie', 'border terrier', 'borzoi', 'boston terrier',
-    'bouvier des flandres', 'boxer', 'bracco italiano', 'briard', 'brittany', 'bull mastiff',
-    'bull terrier', 'bulldog', 'cairn terrier', 'canaan dog', 'canadian eskimo dog', 'cane corso',
-    'cavalier king charles spaniel', 'central asian shepherd dog', 'cesky terrier',
-    'chesapeake bay retriever', 'chihuahua', 'chinese crested', 'chinese shar pei', 'chow chow',
-    'clumber spaniel', 'cocker spaniel', 'collie', 'cotton de tulear', 'curly coated retriever',
-    'dachshund', 'dalmatian', 'dandie dinmont terrier', 'deerhound', 'dobermann', 'dogue de bordeaux',
-    'english setter', 'english springer spaniel', 'english toy terrier', 'entlebucher mountain dog',
-    'eurasier', 'field spaniel', 'finnish lapphund', 'finnish spitz', 'flatcoated retriever',
-    'french bulldog', 'german pinscher', 'german shepherd dog', 'german shorthaired pointer',
-    'german spitz', 'german wirehaired pointer', 'giant schnauzer', 'glen of imaal terrier',
-    'gordon setter', 'grand bleu de gascogne', 'greenland dog', 'greyhound', 'griffon bruxellois',
-    'hamiltonstovare', 'havanese', 'hungarian puli', 'hungarian vizsla', 'hungarian wire haired vizsla',
-    'ibizan hound', 'icelandic sheepdog', 'irish red and white setter', 'irish setter',
-    'irish terrier', 'irish water spaniel', 'irish wolfhound', 'italian greyhound',
-    'japanese akita inu', 'japanese chin', 'japanese shiba inu', 'japanese spitz', 'kangal dog',
-    'keeshond', 'kerry blue terrier', 'king charles spaniel', 'klee kai', 'komondor', 'kooikerhondje',
-    'korean jindo', 'kuvasz', 'labrador retriever', 'lakeland terrier', 'leonberger', 'lhasa apso',
-    'lowchen', 'lundehund', 'malamute', 'maltese', 'manchester terrier', 'mastiff',
-    'mexican hairless', 'miniature pinscher', 'miniature schnauzer', 'neapolitan mastiff',
-    'newfoundland', 'norfolk terrier', 'norwegian buhund', 'norwegian elkhound',
-    'norwegian lundehund', 'norwich terrier', 'old english sheepdog', 'otterhound',
-    'papillon', 'parson russell terrier', 'pekingese', 'perro de agua espanol',
-    'petit basset griffon vendeen', 'pharaoh hound', 'picardy sheepdog', 'pinscher', 'pointer',
-    'polish lowland sheepdog', 'pomeranian', 'poodle', 'portuguese podengo',
-    'portuguese pointer', 'portuguese water dog', 'presa canario', 'pug', 'puli',
-    'pyrenean mountain dog', 'pyrenean sheepdog', 'rafeiro do alentejo', 'rhodesian ridgeback',
-    'rottweiler', 'russian black terrier', 'russian toy', 'saint bernard', 'saluki',
-    'samoyed', 'schipperke', 'schnauzer', 'scottish terrier', 'sealyham terrier',
-    'setter', 'shar pei', 'shetland sheepdog', 'shiba inu', 'shih tzu', 'siberian husky',
-    'skye terrier', 'sloughi', 'small munsterlander', 'soft coated wheaten terrier',
-    'spaniel', 'spanish mastiff', 'spanish water dog', 'spinone italiano',
-    'staffordshire bull terrier', 'sussex spaniel', 'swedish vallhund', 'taiwan dog',
-    'tibetan mastiff', 'tibetan spaniel', 'tibetan terrier', 'vizsla', 'weimaraner',
-    'welsh corgi', 'welsh springer spaniel', 'welsh terrier', 'west highland white terrier',
-    'whippet', 'white swiss shepherd dog', 'wire fox terrier', 'wire haired vizsla',
-    'yorkshire terrier'
-}
-
-KC_BREEDS.discard("golden retriever")
-
-# ———————————————————————————————————————————
-# Playwright storage
+# Playwright storage persistence
 # ———————————————————————————————————————————
 async def save_storage_state(page, state_file="storage_state.json"):
     storage = await page.context.storage_state()
@@ -132,10 +84,10 @@ async def load_storage_state(context, state_file="storage_state.json"):
                 await context.add_cookies(storage["cookies"])
         print(f"[INFO] Loaded storage state from {state_file}")
     else:
-        print("[INFO] No storage state found, starting fresh.")
+        print(f"[INFO] No storage state found, starting fresh.")
 
 # ———————————————————————————————————————————
-# Utility Functions
+# PDF text extraction
 # ———————————————————————————————————————————
 def extract_text_from_pdf(path):
     try:
@@ -145,6 +97,9 @@ def extract_text_from_pdf(path):
         print(f"[ERROR] PDF extract failed for {path}: {e}")
         return ""
 
+# ———————————————————————————————————————————
+# Utilities: postcode, driving, cost, judges, date, points
+# ———————————————————————————————————————————
 def get_postcode(text):
     m = re.search(r"\b([A-Z]{1,2}\d{1,2}[A-Z]?) ?\d[A-Z]{2}\b", text)
     return m.group(0) if m else None
@@ -160,11 +115,11 @@ def get_drive(from_pc, to_pc, cache):
                 "origins": from_pc,
                 "destinations": to_pc,
                 "mode": "driving",
-                "key": GOOGLE_MAPS_API_KEY,
-            },
+                "key": GOOGLE_MAPS_API_KEY
+            }
         ).json()
         e = r["rows"][0]["elements"][0]
-        res = {"duration": e["duration"]["value"], "distance": e["distance"]["value"] / 1000}
+        res = {"duration": e["duration"]["value"], "distance": e["distance"]["value"]/1000}
         cache[key] = res
         with open(CACHE_FILE, "w") as f:
             json.dump(cache, f)
@@ -175,10 +130,12 @@ def get_drive(from_pc, to_pc, cache):
 
 def get_diesel_price():
     try:
-        html = requests.get("https://www.globalpetrolprices.com/diesel_prices/").text
-        soup = BeautifulSoup(html, "html.parser")
+        soup = BeautifulSoup(
+            requests.get("https://www.globalpetrolprices.com/diesel_prices/").text,
+            "html.parser"
+        )
         row = soup.find("td", string=re.compile("United Kingdom")).find_parent("tr")
-        return float(row.find_all("td")[2].text.strip().replace("\u00a3", ""))
+        return float(row.find_all("td")[2].text.strip().replace("£",""))
     except:
         return 1.60
 
@@ -217,6 +174,26 @@ def jw_points(text):
     if "open show" in txt: return 1
     return 0
 
+def find_clashes_and_combos(results):
+    by_date = {}
+    for s in results:
+        d = s.get("date")
+        if d: by_date.setdefault(d, []).append(s)
+    for group in by_date.values():
+        if len(group)>1:
+            for s in group: s["clash"]=True
+    for i,a in enumerate(results):
+        if not a.get("postcode") or a.get("duration_hr",0)<=3: continue
+        for b in results[i+1:]:
+            if not b.get("postcode") or b.get("duration_hr",0)<=3: continue
+            da = datetime.datetime.fromisoformat(a["date"])
+            db = datetime.datetime.fromisoformat(b["date"])
+            if abs((da-db).days)==1:
+                inter = get_drive(a["postcode"], b["postcode"], travel_cache)
+                if inter and inter["duration"]<=75*60:
+                    a.setdefault("combo_with",[]).append(b["show"])
+                    b.setdefault("combo_with",[]).append(a["show"])
+
 def should_include_class(name):
     name_l = name.lower()
     if any(exc.lower() in name_l for exc in CLASS_EXCLUSIONS): return False
@@ -224,29 +201,8 @@ def should_include_class(name):
         return True
     return False
 
-def find_clashes_and_combos(results):
-    by_date = {}
-    for s in results:
-        d = s.get("date")
-        if d: by_date.setdefault(d, []).append(s)
-    for group in by_date.values():
-        if len(group) > 1:
-            for s in group: s["clash"] = True
-
-    for i, a in enumerate(results):
-        if not a.get("postcode") or a.get("duration_hr", 0) <= 3: continue
-        for b in results[i+1:]:
-            if not b.get("postcode") or b.get("duration_hr", 0) <= 3: continue
-            da = datetime.datetime.fromisoformat(a["date"])
-            db = datetime.datetime.fromisoformat(b["date"])
-            if abs((da - db).days) == 1:
-                inter = get_drive(a["postcode"], b["postcode"], travel_cache)
-                if inter and inter["duration"] <= 75 * 60:
-                    a.setdefault("combo_with", []).append(b["show"])
-                    b.setdefault("combo_with", []).append(a["show"])
-
 # ———————————————————————————————————————————
-# Fetch show links — exclude accessory pages
+# Fetch only proper show links
 # ———————————————————————————————————————————
 def fetch_aspx_links():
     try:
@@ -260,11 +216,6 @@ def fetch_aspx_links():
                 "/shows/Shows-To-Enter.aspx",
                 "/shows/Shows-Starting-Soon.aspx"
             ):
-                breed_text = href.split("/")[-1].replace("-", " ").replace(".aspx", "").lower()
-                if any(breed in breed_text for breed in KC_BREEDS):
-                    if "golden" not in breed_text:
-                        print(f"[SKIP] {href} — single-breed show not for Goldens")
-                        continue
                 links.append("https://www.fossedata.co.uk" + href)
         print(f"[INFO] Found {len(links)} show links.")
         with open("aspx_links.txt", "w") as f:
@@ -275,7 +226,7 @@ def fetch_aspx_links():
         return []
 
 # ———————————————————————————————————————————
-# PDF scraping with Playwright & POST fallback
+# Playwright download logic
 # ———————————————————————————————————————————
 async def download_schedule_playwright(show_url):
     try:
@@ -293,11 +244,10 @@ async def download_schedule_playwright(show_url):
 
             await page.goto(show_url, wait_until="networkidle")
             await load_storage_state(page.context)
-
-            await page.evaluate("""
+            await page.evaluate("""() => {
                 const o = document.getElementById('cookiescript_injected_wrapper');
-                if(o) o.remove();
-            """)
+                if (o) o.remove();
+            }""")
 
             try:
                 async with page.expect_download() as dl:
@@ -309,23 +259,22 @@ async def download_schedule_playwright(show_url):
                 await browser.close()
                 print(f"[INFO] Downloaded: {fname}")
                 return fname
+
             except Exception:
                 print("[WARN] download click failed — falling back to POST…")
-                form_data = await page.evaluate("""
-                    () => {
-                        const data = {};
-                        for(const [k,v] of new FormData(document.querySelector('#aspnetForm'))){
-                            data[k]=v;
-                        }
-                        return data;
+                form_data = await page.evaluate("""() => {
+                    const data = {};
+                    for (const [k,v] of new FormData(document.querySelector('#aspnetForm'))) {
+                        data[k] = v;
                     }
-                """)
+                    return data;
+                }""")
                 resp = await page.context.request.post(show_url, data=form_data)
                 ct = resp.headers.get("content-type", "")
                 if resp.ok and "application/pdf" in ct:
                     pdfb = await resp.body()
-                    out = show_url.rsplit("/",1)[-1].replace(".aspx", ".pdf")
-                    with open(out,"wb") as f: f.write(pdfb)
+                    out = show_url.rsplit("/",1)[-1].replace(".aspx",".pdf")
+                    with open(out, "wb") as f: f.write(pdfb)
                     await save_storage_state(page)
                     await browser.close()
                     print(f"[INFO] Fallback PDF saved: {out}")
@@ -334,15 +283,17 @@ async def download_schedule_playwright(show_url):
                     print(f"[ERROR] Fallback POST failed: {resp.status} {ct}")
                     await browser.close()
                     return None
+
     except Exception as e:
         print(f"[ERROR] Playwright failed for {show_url}: {e}")
         return None
 
 # ———————————————————————————————————————————
-# Orchestrator
+# full_run orchestrator
 # ———————————————————————————————————————————
 async def full_run():
     global travel_cache
+
     urls = fetch_aspx_links()
     if not urls:
         print("[WARN] No show URLs found.")
@@ -372,9 +323,9 @@ async def full_run():
             "pdf": pdf,
             "date": dt.isoformat() if dt else None,
             "postcode": pc,
-            "duration_hr": round(drive["duration"]/3600,2) if drive else None,
-            "distance_km": round(drive["distance"],1) if drive else None,
-            "cost_estimate": round(cost,2) if cost else None,
+            "duration_hr": round(drive["duration"]/3600, 2) if drive else None,
+            "distance_km": round(drive["distance"], 1) if drive else None,
+            "cost_estimate": round(cost, 2) if cost else None,
             "points": jw_points(text),
             "judge": judge,
         })
@@ -385,10 +336,13 @@ async def full_run():
         json.dump(shows, f, indent=2)
     with open("results.csv", "w", newline="") as cf:
         w = csv.writer(cf)
-        w.writerow(["Show","Date","Postcode","Distance (km)","Time (hr)","Estimated Cost","JW Points","Golden Judge(s)","Clash","Combos"])
+        w.writerow([
+            "Show","Date","Postcode","Distance (km)","Time (hr)",
+            "Estimated Cost","JW Points","Golden Judge(s)","Clash","Combos"
+        ])
         for s in shows:
-            jt = ", ".join(f"{k}: {v}" for k,v in (s.get("judge") or {}).items())
-            combos = "; ".join(s.get("combo_with",[]))
+            jt = ", ".join(f"{k}: {v}" for k, v in (s.get("judge") or {}).items())
+            combos = "; ".join(s.get("combo_with", []))
             w.writerow([
                 s["show"], s["date"], s["postcode"],
                 s.get("distance_km"), s.get("duration_hr"),
@@ -398,5 +352,6 @@ async def full_run():
 
     upload_to_drive("results.json", "application/json")
     upload_to_drive("results.csv", "text/csv")
+
     print(f"[INFO] Processed {len(shows)} shows with Golden Retriever classes.")
     return shows
