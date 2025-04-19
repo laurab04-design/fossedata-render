@@ -383,7 +383,7 @@ async def full_run():
             travel_cache = json.load(f)
 
     # load processed shows cache once
-    processed_shows = load_processed_shows(
+    processed_shows = load_processed_shows()
     
     shows = []
     for url in urls:
