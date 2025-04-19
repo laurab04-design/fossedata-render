@@ -34,8 +34,8 @@ async def root():
 @app.get("/run")
 async def trigger_run(background_tasks: BackgroundTasks):
     try:
-        # Run full_run in the background to avoid request timeout
-        background_tasks.add_task(asyncio.create_task, full_run())
+        loop = asyncio.get_running_loop()
+        background_tasks.add_task(loop.create_task, full_run())
         return {"status": "started", "message": "Background scrape started."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Run failed: {e}")
