@@ -4,7 +4,7 @@ import subprocess
 from pathlib import Path
 import asyncio
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fossedata_core import full_run
 
 # Ensure Playwright uses its vendored browsers
@@ -32,11 +32,10 @@ async def root():
     return {"status": "ok", "message": "FosseData Render service is running."}
 
 @app.get("/run")
-async def trigger_run():
+async def trigger_run(background_tasks: BackgroundTasks):
     try:
-        # No more manual timeout—let full_run run to completion
-        shows = await full_run()
-        return {"status": "completed", "shows": len(shows)}
+        # Run full_run in the background to avoid request timeout
+        background_tasks.add_task(asyncio.create_task, full_run())
+        return {"status": "started", "message": "Background scrape started."}
     except Exception as e:
-        # Catches anything that blows up inside full_run
         raise HTTPException(status_code=500, detail=f"Run failed: {e}")
