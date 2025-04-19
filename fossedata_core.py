@@ -382,8 +382,15 @@ async def full_run():
         with open(CACHE_FILE, "r") as f:
             travel_cache = json.load(f)
 
+    # load processed shows cache once
+    processed_shows = load_processed_shows(
+    
     shows = []
     for url in urls:
+         # skip early if already processed
+        if is_show_processed(url, processed_shows):
+            print(f"[INFO] Skipping {url} — already processed (early skip).")
+            continue
         pdf = await download_schedule_playwright(url)
         if not pdf:
             continue
