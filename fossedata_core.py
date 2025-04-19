@@ -317,6 +317,17 @@ def fetch_aspx_links():
         soup = BeautifulSoup(r.text, "html.parser")
         links = []
 
+        EXCLUDED_BREED_TERMS = {
+            "terrier", "bull terrier", "border collie", "collie", "pointer",
+            "german shorthaired pointer", "weimaraner", "heeler", "mastiff",
+            "spaniel", "cocker spaniel", "king charles spaniel", "tibetan spaniel",
+            "setter", "english setter", "hound", "toy", "pinscher",
+            "flatcoated retriever", "labrador retriever", "bullmastiff",
+            "dobermann", "lagotto romagnolo", "bernese mountain dog",
+            "japanese shiba inu", "shiba", "fox terrier", "yorkshire terrier",
+            "poodle", "akita", "schnauzer", "dachshund", "bulldog"
+        }
+
         for a in soup.select("a[href$='.aspx']"):
             href = a["href"]
             if not href.startswith("/shows/") or href in (
@@ -333,6 +344,7 @@ def fetch_aspx_links():
             if "golden" in link_text or "golden" in url_text:
                 links.append(full_url)
                 continue
+
             # Create a unified string for matching: cleaned visible text + cleaned URL text
             link_text = a.text.lower().strip()
             url_text = (
@@ -343,12 +355,17 @@ def fetch_aspx_links():
                 .lower()
                 .strip()
             )
-            # Otherwise check for single-breed shows we want to skip
             text_for_matching = f"{link_text} {url_text}"
-            breed_matches = [breed for breed in KC_BREEDS if breed in text_for_matching]
 
+            # Check if it matches exactly one non-golden breed
+            breed_matches = [breed for breed in KC_BREEDS if breed in text_for_matching]
             if len(breed_matches) == 1 and "golden" not in breed_matches[0]:
                 print(f"[INFO] Skipping single-breed show: {link_text.strip()} ({breed_matches[0]})")
+                continue
+
+            # Also skip if it matches *any* term in the excluded set
+            if any(term in text_for_matching for term in EXCLUDED_BREED_TERMS):
+                print(f"[INFO] Skipping based on excluded term: {link_text.strip()}")
                 continue
 
             links.append(full_url)
