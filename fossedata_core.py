@@ -387,6 +387,8 @@ async def full_run():
         text = extract_text_from_pdf(pdf)
         if "golden" not in text.lower():
             print(f"[INFO] Skipping {pdf} — no 'golden'")
+            processed_shows[url] = pdf  # Mark as processed anyway
+            save_processed_shows(processed_shows)
             continue
         pc = get_postcode(text)
         drive = get_drive(HOME_POSTCODE, pc, travel_cache) if pc else None
