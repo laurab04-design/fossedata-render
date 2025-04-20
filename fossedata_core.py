@@ -624,7 +624,7 @@ async def download_schedule_playwright(show_url, processed_shows):
             pc = get_postcode(text)
             drive = get_drive(HOME_POSTCODE, pc, travel_cache) if pc else None
             cost = estimate_cost(drive["distance"], drive["duration"]) if drive else None
-            judge = extract_judges(text)
+            judge = extract_judges(text, is_single_breed="single breed" in text.lower())
             dt = get_show_date(text)
 
             # Step 4 — Save full show data
@@ -709,7 +709,7 @@ async def full_run():
         pc = get_postcode(text)
         drive = get_drive(HOME_POSTCODE, pc, travel_cache) if pc else None
         cost = estimate_cost(drive["distance"], drive["duration"]) if drive else None
-        judge = extract_judges(text)
+        judge = extract_judges(text, is_single_breed="single breed" in text.lower())
         dt = get_show_date(text) or get_show_date_from_title(url)
         show_type = get_show_type(text)
 
