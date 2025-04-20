@@ -767,4 +767,4 @@ else:
         save_travel_cache(travel_cache)
 
     print(f"[INFO] Processed {len(shows)} shows with Golden Retriever classes.")
-    return shows
+        return shows
