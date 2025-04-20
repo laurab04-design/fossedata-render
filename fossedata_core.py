@@ -269,24 +269,84 @@ def get_diesel_price():
         return 1.60
 
 def estimate_cost(dist_km, dur_s):
-    miles = dist_km * 0.621371
+    round_trip_miles = dist_km * 2 * 0.621371
     price = get_diesel_price()
-    gal = miles / MPG
+    gal = round_trip_miles / MPG
     fuel = gal * 4.54609 * price
     return fuel + OVERNIGHT_COST if dur_s > OVERNIGHT_THRESHOLD_HOURS * 3600 else fuel
 
-def extract_judges(text):
-    secs = text.lower().split("retriever (golden)")
-    out = {}
-    for sec in secs[1:]:
-        dogs = re.search(r"dogs.*judge.*?:\s*([A-Z][a-z].+)", sec, re.I)
-        bitches = re.search(r"bitches.*judge.*?:\s*([A-Z][a-z].+)", sec, re.I)
-        anyj = re.search(r"judge.*?:\s*([A-Z][a-z].+)", sec, re.I)
-        if dogs: out["dogs"] = dogs.group(1).strip()
-        if bitches: out["bitches"] = bitches.group(1).strip()
-        if not out and anyj: out["all"] = anyj.group(1).strip()
-        break
-    return out or None
+def get_show_type(text):
+    lines = text.lower().splitlines()
+    for line in lines[:20]:  # Top of the file only
+        if "championship show" in line:
+            return "Championship"
+        if "premier open show" in line or "open show" in line:
+            return "Open"
+    return "Unknown"
+
+def extract_golden_retriever_section(text: str) -> str:
+    pattern = r'retriever\s*\(golden\).*?(?=(\n[A-Z][^\n]{0,60}\n|$))'  # stops at next uppercase block
+    match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
+    return match.group(0) if match else text
+
+def extract_judges(text: str, is_single_breed: bool) -> dict:
+    judges = {"dogs": None, "bitches": None, "both": None}
+    affixes = {"dogs": None, "bitches": None, "both": None}
+
+    def split_judge_affix(raw: str):
+        name = raw.strip()
+        affix_match = re.search(r'\(([^)]+)\)', name)
+        affix = affix_match.group(1).strip() if affix_match else None
+        name = re.sub(r'\(.*?\)', '', name).strip()
+        name = re.split(r',|\d+|puppy|junior|novice|graduate|post ?graduate|open|limit|yearling', name, flags=re.IGNORECASE)[0].strip()
+        return name, affix
+
+    def is_valid_judge_line(line: str) -> bool:
+        if len(line.split()) > 12:
+            return False
+        blacklist = ["refund", "policy", "expenses", "secretary", "schedule", "disqualification"]
+        return not any(bad_word in line.lower() for bad_word in blacklist)
+
+    if is_single_breed:
+        dog_match = re.search(r'dogs:\s*(.+)', text, re.IGNORECASE)
+        bitch_match = re.search(r'bitches:\s*(.+)', text, re.IGNORECASE)
+        both_match = re.search(r'judge:\s*(.+)', text, re.IGNORECASE)
+
+        if dog_match and is_valid_judge_line(dog_match.group(1)):
+            name, affix = split_judge_affix(dog_match.group(1))
+            judges["dogs"] = name
+            affixes["dogs"] = affix
+        if bitch_match and is_valid_judge_line(bitch_match.group(1)):
+            name, affix = split_judge_affix(bitch_match.group(1))
+            judges["bitches"] = name
+            affixes["bitches"] = affix
+        elif both_match and is_valid_judge_line(both_match.group(1)):
+            name, affix = split_judge_affix(both_match.group(1))
+            judges["both"] = name
+            affixes["both"] = affix
+
+    else:
+        breed_block = extract_golden_retriever_section(text)
+        lines = breed_block.splitlines()
+        for i, line in enumerate(lines):
+            line = line.strip()
+            if not is_valid_judge_line(line):
+                continue
+            if re.search(r'judge[s]?:', line, re.IGNORECASE):
+                match = re.search(r'judge[s]?:\s*(.+)', line, re.IGNORECASE)
+                if match:
+                    name, affix = split_judge_affix(match.group(1))
+                    if "bitch" in line.lower():
+                        judges["bitches"] = name
+                        affixes["bitches"] = affix
+                    elif "dog" in line.lower():
+                        judges["dogs"] = name
+                        affixes["dogs"] = affix
+                    elif not judges["both"]:
+                        judges["both"] = name
+                        affixes["both"] = affix
+
+    return {"names": judges, "affixes": affixes}
 
 def get_show_date(text):
     m = re.search(r"Date Of Show:\s*([A-Za-z]+,\s*\d{1,2}\s+[A-Za-z]+\s+\d{4})", text)
@@ -309,10 +369,24 @@ def get_show_date_from_title(aspx_url):
         print(f"[WARN] Failed to extract show date from title: {e}")
     return None
 
-def jw_points(text):
-    txt = text.lower()
-    if "championship show" in txt: return 9
-    if "open show" in txt: return 1
+def jw_points(text, show_type):
+    if show_type == "Open":
+        return 1
+
+    if show_type == "Championship":
+        eligible_classes = [
+            "special beginners", "puppy", "junior", "yearling", "tyro"]
+
+        count = 0
+        for line in text.lower().splitlines():
+            if "golden" in line:
+                for cls in eligible_classes:
+                    if cls in line:
+                        count += 1
+                        break
+
+        return min(count, 2) * 3
+
     return 0
 
 def find_clashes_and_combos(results):
@@ -371,6 +445,7 @@ def fetch_aspx_links():
         r = requests.get("https://www.fossedata.co.uk/shows/Shows-To-Enter.aspx")
         soup = BeautifulSoup(r.text, "html.parser")
         links = []
+        seen_ids = set()
 
         EXCLUDED_BREED_TERMS = {
             "terrier", "bull terrier", "border collie", "collie", "pointer",
@@ -392,6 +467,13 @@ def fetch_aspx_links():
                 continue
 
             full_url = "https://www.fossedata.co.uk" + href
+            match = re.search(r'ShowID=(\d+)', full_url)
+            if match:
+                show_id = match.group(1)
+                if show_id in seen_ids:
+                    continue
+                seen_ids.add(show_id)
+
             link_text = a.text.lower()
             url_text = href.split("/")[-1].replace(".aspx", "").replace("-", " ").lower()
 
@@ -432,10 +514,9 @@ def fetch_aspx_links():
     except Exception as e:
         print(f"[ERROR] Error fetching ASPX links: {e}")
         return []
-# ———————————————————————————————————————————
-# Playwright download logic
-# ———————————————————————————————————————————
-
+# _________________________________________        
+# playwright download
+# ——————————————————————————————————————————
 async def download_schedule_playwright(show_url, processed_shows):
     if is_show_processed(show_url, processed_shows):
         cached_pdf_path = processed_shows[show_url]
@@ -479,6 +560,26 @@ async def download_schedule_playwright(show_url, processed_shows):
                 if (o) o.remove();
             }""")
 
+            # Step 1 — Extract entry close dates from the page
+            entry_close_postal = None
+            entry_close_online = None
+            try:
+                rows = await page.query_selector_all("table tr")
+                for row in rows:
+                    cells = await row.query_selector_all("td")
+                    if len(cells) < 2:
+                        continue
+                    key = (await cells[0].inner_text()).strip().lower()
+                    val = (await cells[1].inner_text()).strip()
+
+                    if "postal entries close" in key and "closed" not in val.lower():
+                        entry_close_postal = val
+                    elif "online entries close" in key and "closed" not in val.lower():
+                        entry_close_online = val
+            except Exception as e:
+                print(f"[WARN] Failed to extract entry close dates: {e}")
+
+            # Step 2 — Attempt PDF download via button
             try:
                 await page.wait_for_selector("#ctl00_ContentPlaceHolder_btnDownloadSchedule", timeout=5000)
                 async with page.expect_download(timeout=10000) as dl:
@@ -490,65 +591,64 @@ async def download_schedule_playwright(show_url, processed_shows):
                 await save_storage_state(page)
                 await browser.close()
                 print(f"[INFO] Downloaded: {file_path}")
-
-                processed_shows[show_url] = file_path
-                save_processed_shows(processed_shows)
-                return file_path
-
             except Exception as e:
                 print(f"[WARN] Download click failed for {show_url}: {e}")
                 print("[INFO] Attempting fallback POST...")
 
-            # Fallback download attempt via form POST
-            form_data = await page.evaluate("""() => {
-                const data = {};
-                for (const [k,v] of new FormData(document.querySelector('#aspnetForm'))) {
-                    data[k] = v;
-                }
-                return data;
-            }""")
-            resp = await page.context.request.post(show_url, data=form_data)
-            ct = resp.headers.get("content-type", "")
-            if resp.ok and "application/pdf" in ct:
-                pdfb = await resp.body()
-                out = show_url.rsplit("/", 1)[-1].replace(".aspx", ".pdf")
-                with open(out, "wb") as f:
-                    f.write(pdfb)
-                await save_storage_state(page)
-                await browser.close()
-                print(f"[INFO] Fallback PDF saved: {out}")
+                # Fallback PDF via form POST
+                form_data = await page.evaluate("""() => {
+                    const data = {};
+                    for (const [k,v] of new FormData(document.querySelector('#aspnetForm'))) {
+                        data[k] = v;
+                    }
+                    return data;
+                }""")
+                resp = await page.context.request.post(show_url, data=form_data)
+                ct = resp.headers.get("content-type", "")
+                if resp.ok and "application/pdf" in ct:
+                    pdfb = await resp.body()
+                    fname = show_url.rsplit("/", 1)[-1].replace(".aspx", ".pdf")
+                    file_path = os.path.join(CACHE_DIR, fname)
+                    with open(file_path, "wb") as f:
+                        f.write(pdfb)
+                    await save_storage_state(page)
+                    await browser.close()
+                    print(f"[INFO] Fallback PDF saved: {file_path}")
+                else:
+                    print(f"[ERROR] Fallback POST failed: {resp.status} {ct}")
+                    await browser.close()
+                    return None
 
-                text = extract_text_from_pdf(out)
-                pc = get_postcode(text)
-                drive = get_drive(HOME_POSTCODE, pc, travel_cache) if pc else None
-                cost = estimate_cost(drive["distance"], drive["duration"]) if drive else None
-                judge = extract_judges(text)
-                dt = get_show_date(text)
+            # Step 3 — Extract data from the PDF
+            text = extract_text_from_pdf(file_path)
+            pc = get_postcode(text)
+            drive = get_drive(HOME_POSTCODE, pc, travel_cache) if pc else None
+            cost = estimate_cost(drive["distance"], drive["duration"]) if drive else None
+            judge = extract_judges(text)
+            dt = get_show_date(text)
 
-                show_data = {
-                    "show": show_url,
-                    "pdf": out,
-                    "date": dt.isoformat() if dt else None,
-                    "postcode": pc,
-                    "duration_hr": round(drive["duration"]/3600, 2) if drive else None,
-                    "distance_km": round(drive["distance"], 1) if drive else None,
-                    "cost_estimate": round(cost, 2) if cost else None,
-                    "points": jw_points(text),
-                    "judge": judge,
-                }
+            # Step 4 — Save full show data
+            show_data = {
+                "show": show_url,
+                "pdf": file_path,
+                "date": dt.isoformat() if dt else None,
+                "postcode": pc,
+                "duration_hr": round(drive["duration"]/3600, 2) if drive else None,
+                "distance_km": round(drive["distance"], 1) if drive else None,
+                "cost_estimate": round(cost, 2) if cost else None,
+                "points": jw_points(text),
+                "judge": judge,
+                "entry_close_postal": entry_close_postal,
+                "entry_close_online": entry_close_online,
+            }
 
-                processed_shows[show_url] = show_data
-                save_processed_shows(processed_shows)
-                return out
-            else:
-                print(f"[ERROR] Fallback POST failed: {resp.status} {ct}")
-                await browser.close()
-                return None
+            processed_shows[show_url] = show_data
+            save_processed_shows(processed_shows)
+            return file_path
 
     except Exception as e:
         print(f"[ERROR] Playwright crashed entirely for {show_url}: {e}")
         return None
-
 # ———————————————————————————————————————————
 # full_run orchestrator
 # ———————————————————————————————————————————
@@ -611,6 +711,8 @@ async def full_run():
         cost = estimate_cost(drive["distance"], drive["duration"]) if drive else None
         judge = extract_judges(text)
         dt = get_show_date(text) or get_show_date_from_title(url)
+        show_type = get_show_type(text)
+
         shows.append({
             "show": url,
             "pdf": pdf,
@@ -619,10 +721,10 @@ async def full_run():
             "duration_hr": round(drive["duration"]/3600, 2) if drive else None,
             "distance_km": round(drive["distance"], 1) if drive else None,
             "cost_estimate": round(cost, 2) if cost else None,
-            "points": jw_points(text),
+            "show_type": show_type,
+            "points": jw_points(text, show_type),
             "judge": judge,
         })
-
         save_processed_shows(processed_shows)
         upload_to_drive("processed_shows.json", "application/json")
 
@@ -632,30 +734,34 @@ async def full_run():
     save_processed_shows(processed_shows)
     upload_to_drive("processed_shows.json", "application/json")
 
-    if shows:
-        with open("results.json", "w") as f:
-            json.dump(shows, f, indent=2)
+if shows:
+    with open("results.json", "w") as f:
+        json.dump(shows, f, indent=2)
 
-        with open("results.csv", "w", newline="") as cf:
-            w = csv.writer(cf)
+    with open("results.csv", "w", newline="") as cf:
+        w = csv.writer(cf)
+        w.writerow([
+            "Show", "Date", "Postcode", "Show Type",
+            "Postal Close", "Online Close",
+            "Distance (km)", "Time (hr)",
+            "Estimated Cost", "JW Points", "Golden Judge(s)","Judge Affix(es)" "Clash", "Combos"
+        ])
+        for s in shows:
+            jt = ", ".join(f"{k}: {v}" for k, v in (s.get("judge") or {}).items())
+            combos = "; ".join(s.get("combo_with", []))
             w.writerow([
-                "Show", "Date", "Postcode", "Distance (km)", "Time (hr)",
-                "Estimated Cost", "JW Points", "Golden Judge(s)", "Clash", "Combos"
+                s["show"], s["date"], s["postcode"], s.get("show_type", "") or "",
+                s.get("entry_close_postal", "") or "",
+                s.get("entry_close_online", "") or "",
+                s.get("distance_km"), s.get("duration_hr"),
+                s.get("cost_estimate"), s["points"],
+                jt, "Yes" if s.get("clash") else "", combos
             ])
-            for s in shows:
-                jt = ", ".join(f"{k}: {v}" for k, v in (s.get("judge") or {}).items())
-                combos = "; ".join(s.get("combo_with", []))
-                w.writerow([
-                    s["show"], s["date"], s["postcode"],
-                    s.get("distance_km"), s.get("duration_hr"),
-                    s.get("cost_estimate"), s["points"],
-                    jt, "Yes" if s.get("clash") else "", combos
-                ])
 
-        upload_to_drive("results.json", "application/json")
-        upload_to_drive("results.csv", "text/csv")
-    else:
-        print("[INFO] No Golden Retriever shows processed — skipping results upload.")
+    upload_to_drive("results.json", "application/json")
+    upload_to_drive("results.csv", "text/csv")
+else:
+    print("[INFO] No Golden Retriever shows processed — skipping results upload.")
 
     if travel_updated:
         save_travel_cache(travel_cache)
