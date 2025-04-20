@@ -653,12 +653,12 @@ async def download_schedule_playwright(show_url, processed_shows):
             save_processed_shows(processed_shows)
             return file_path
 
-    except Exception as e:
-        print(f"[ERROR] Playwright crashed entirely for {show_url}: {e}")
-        print(f"[ERROR] Failed to process {show_url}: {e}")
-    processed_shows[show_url] = {"error": str(e)}
-    save_processed_shows(processed_shows)
-    return None
+        except Exception as e:
+            print(f"[ERROR] Playwright crashed entirely for {show_url}: {e}")
+            print(f"[ERROR] Failed to process {show_url}: {e}")
+            processed_shows[show_url] = {"error": str(e)}
+            save_processed_shows(processed_shows)
+            return None
 
 
 # ———————————————————————————————————————————
