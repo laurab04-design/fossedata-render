@@ -624,6 +624,7 @@ async def download_schedule_playwright(show_url, processed_shows):
                     await browser.close()
                     return None
 
+        try:
             # Step 3 — Extract data from the PDF
             text = extract_text_from_pdf(file_path)
             pc = get_postcode(text)
@@ -654,7 +655,12 @@ async def download_schedule_playwright(show_url, processed_shows):
 
     except Exception as e:
         print(f"[ERROR] Playwright crashed entirely for {show_url}: {e}")
-        return None
+        print(f"[ERROR] Failed to process {show_url}: {e}")
+    processed_shows[show_url] = {"error": str(e)}
+    save_processed_shows(processed_shows)
+    return None
+
+
 # ———————————————————————————————————————————
 # full_run orchestrator
 # ———————————————————————————————————————————
