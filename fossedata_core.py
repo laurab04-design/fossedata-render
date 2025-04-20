@@ -705,6 +705,7 @@ async def full_run():
         return []
 
     travel_cache = {}
+    download_from_drive("travel_cache.json")
     if Path("travel_cache.json").exists():
         with open("travel_cache.json", "r") as f:
             travel_cache = json.load(f)
@@ -759,6 +760,9 @@ async def full_run():
             "points": jw_points(text, show_type),
             "judge": judge,
         })
+    if len(shows) % 30 == 0:
+        save_travel_cache(travel_cache)
+        upload_to_drive("travel_cache.json", "application/json")
         save_processed_shows(processed_shows)
         upload_to_drive("processed_shows.json", "application/json")
 
@@ -800,6 +804,7 @@ async def full_run():
 
     if travel_updated:
         save_travel_cache(travel_cache)
+        upload_to_drive("travel_cache.json", "application/json")
 
     print(f"[INFO] Processed {len(shows)} shows with Golden Retriever classes.")
     return shows
