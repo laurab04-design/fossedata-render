@@ -626,6 +626,7 @@ async def download_schedule_playwright(show_url, processed_shows):
             cost = estimate_cost(drive["distance"], drive["duration"]) if drive else None
             judge = extract_judges(text, is_single_breed="single breed" in text.lower())
             dt = get_show_date(text)
+            show_type = get_show_type(text)
 
             # Step 4 — Save full show data
             show_data = {
@@ -636,7 +637,7 @@ async def download_schedule_playwright(show_url, processed_shows):
                 "duration_hr": round(drive["duration"]/3600, 2) if drive else None,
                 "distance_km": round(drive["distance"], 1) if drive else None,
                 "cost_estimate": round(cost, 2) if cost else None,
-                "points": jw_points(text),
+                "points": jw_points(text, show_type),
                 "judge": judge,
                 "entry_close_postal": entry_close_postal,
                 "entry_close_online": entry_close_online,
