@@ -760,6 +760,7 @@ async def full_run():
             "points": jw_points(text, show_type),
             "judge": judge,
         })
+        
     if len(shows) % 30 == 0:
         save_travel_cache(travel_cache)
         upload_to_drive("travel_cache.json", "application/json")
@@ -776,18 +777,43 @@ async def full_run():
         with open("results.json", "w") as f:
             json.dump(shows, f, indent=2)
 
+        # Write results to CSV
         with open("results.csv", "w", newline="") as cf:
             w = csv.writer(cf)
+            # Write header row
             w.writerow([
-                "Show", "Date", "Postcode", "Show Type",
-                "Postal Close", "Online Close",
-                "Distance (km)", "Time (hr)",
-                "Estimated Cost", "JW Points", "Golden Judge(s)", "Judge Affix(es)", "Clash", "Combos"
+                "Show", "Date", "Postcode", "Show Type", 
+                "Postal Close", "Online Close", 
+                "Distance (km)", "Time (hr)", 
+                "Estimated Cost", "JW Points", 
+                "Golden Judge(s)", "Judge Affix(es)", "Clash", "Combos"
             ])
             for s in shows:
-                jt = ", ".join(f"{k}: {v}" for k, v in (s.get("judge") or {}).items())
-                at = ", ".join(f"{k}: {v}" for k, v in (s.get("judge_affix") or {}).items() if v)
+                # Flatten the 'judge' dictionary
+                judge_data = s.get("judge", {})
+                judges_flat = {
+                    "dogs": judge_data.get("dogs", ""),
+                    "bitches": judge_data.get("bitches", ""),
+                    "both": judge_data.get("both", ""),
+                }
+
+                # Flatten 'judge' and 'affix' data
+                jt = ", ".join(f"{k}: {v}" for k, v in judges_flat.items() if v)
+
+                # Flatten 'judge_affix' if available
+                judge_affix_data = s.get("judge_affix", {})
+                affixes_flat = {
+                    "dogs": judge_affix_data.get("dogs", ""),
+                    "bitches": judge_affix_data.get("bitches", ""),
+                    "both": judge_affix_data.get("both", ""),
+                }
+
+                at = ", ".join(f"{k}: {v}" for k, v in affixes_flat.items() if v)
+
+                # Add combo shows
                 combos = "; ".join(s.get("combo_with", []))
+
+                # Write the row to the CSV file
                 w.writerow([
                     s["show"], s["date"], s["postcode"], s.get("show_type", "") or "",
                     s.get("entry_close_postal", "") or "",
