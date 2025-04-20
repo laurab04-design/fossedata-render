@@ -653,6 +653,7 @@ async def download_schedule_playwright(show_url, processed_shows):
 # ———————————————————————————————————————————
 # full_run orchestrator
 # ———————————————————————————————————————————
+
 # Save the processed show data to the cache
 def save_processed_shows(shows_data):
     try:
@@ -665,7 +666,36 @@ def save_processed_shows(shows_data):
         print(f"[ERROR] Failed to save processed cache: {e}")
 
 
-## full_run orchestrator
+# Download a file from Google Drive
+def download_from_drive(filename, mime_type="application/json"):
+    try:
+        folder_id = os.environ.get("GDRIVE_FOLDER_ID")
+        if not folder_id:
+            print("[ERROR] GDRIVE_FOLDER_ID not set for download.")
+            return
+
+        res = drive_service.files().list(
+            q=f"name='{filename}' and trashed=false and '{folder_id}' in parents",
+            spaces="drive",
+            fields="files(id, name)"
+        ).execute()
+
+        if not res["files"]:
+            print(f"[INFO] {filename} not found in Drive.")
+            return
+
+        file_id = res["files"][0]["id"]
+        request = drive_service.files().get_media(fileId=file_id)
+        fh = open(filename, "wb")
+        fh.write(request.execute())
+        fh.close()
+        print(f"[INFO] Downloaded {filename} from Drive.")
+
+    except Exception as e:
+        print(f"[ERROR] Failed to download {filename}: {e}")
+
+
+# Main async orchestration
 async def full_run():
     global travel_cache
 
@@ -679,9 +709,12 @@ async def full_run():
         with open("travel_cache.json", "r") as f:
             travel_cache = json.load(f)
 
+    # Restore the last known processed_shows cache
+    download_from_drive("processed_shows.json")
+
     processed_shows = load_processed_shows()
     shows = []
-
+    
     for url in urls:
         if is_show_processed(url, processed_shows):
             print(f"[INFO] Skipping {url} — already processed (early skip).")
