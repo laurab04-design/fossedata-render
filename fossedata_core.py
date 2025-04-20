@@ -624,7 +624,7 @@ async def download_schedule_playwright(show_url, processed_shows):
                     await browser.close()
                     return None
 
-        try:
+  try:
     # Step 3 — Extract data from the PDF
     text = extract_text_from_pdf(file_path)
     pc = get_postcode(text)
