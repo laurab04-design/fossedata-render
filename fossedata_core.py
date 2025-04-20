@@ -370,25 +370,36 @@ def get_show_date_from_title(aspx_url):
     return None
 
 def jw_points(text, show_type):
-    if show_type == "Open":
-        return 1
+    # Specific class codes for Delia
+    eligible_classes = [
+        "sbb",  # Special Beginners Bitch
+        "pb",   # Puppy Bitch
+        "jb",   # Junior Bitch
+        "ugb",  # Undergraduate Bitch
+        "tb"    # Tyro Bitch
+    ]
 
+    # Extract the Golden Retriever section from the text
+    golden_section = extract_golden_retriever_section(text)
+
+    # Count how many eligible classes Delia is entered in
+    count = 0
+    for line in golden_section.lower().splitlines():
+        for cls in eligible_classes:
+            if cls in line:
+                count += 1
+                break
+
+    # Championship shows: Multiply the number of eligible classes by 3
     if show_type == "Championship":
-        eligible_classes = [
-            "special beginners", "puppy", "junior", "yearling", "tyro"]
+        return count * 3  # Multiply the count by 3 for potential points per class
 
-        count = 0
-        for line in text.lower().splitlines():
-            if "golden" in line:
-                for cls in eligible_classes:
-                    if cls in line:
-                        count += 1
-                        break
-
-        return min(count, 2) * 3
+    # Open shows: Only 1 point total, regardless of how many eligible classes
+    elif show_type == "Open":
+        return 1 if count > 0 else 0
 
     return 0
-
+    
 def find_clashes_and_combos(results):
     by_date = {}
     missing_dates = []
