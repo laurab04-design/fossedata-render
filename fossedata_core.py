@@ -625,41 +625,40 @@ async def download_schedule_playwright(show_url, processed_shows):
                     return None
 
         try:
-            # Step 3 — Extract data from the PDF
-            text = extract_text_from_pdf(file_path)
-            pc = get_postcode(text)
-            drive = get_drive(HOME_POSTCODE, pc, travel_cache) if pc else None
-            cost = estimate_cost(drive["distance"], drive["duration"]) if drive else None
-            judge = extract_judges(text, is_single_breed="single breed" in text.lower())
-            dt = get_show_date(text)
-            show_type = get_show_type(text)
+    # Step 3 — Extract data from the PDF
+    text = extract_text_from_pdf(file_path)
+    pc = get_postcode(text)
+    drive = get_drive(HOME_POSTCODE, pc, travel_cache) if pc else None
+    cost = estimate_cost(drive["distance"], drive["duration"]) if drive else None
+    judge = extract_judges(text, is_single_breed="single breed" in text.lower())
+    dt = get_show_date(text)
+    show_type = get_show_type(text)
 
-            # Step 4 — Save full show data
-            show_data = {
-                "show": show_url,
-                "pdf": file_path,
-                "date": dt.isoformat() if dt else None,
-                "postcode": pc,
-                "duration_hr": round(drive["duration"]/3600, 2) if drive else None,
-                "distance_km": round(drive["distance"], 1) if drive else None,
-                "cost_estimate": round(cost, 2) if cost else None,
-                "points": jw_points(text, show_type),
-                "judge": judge,
-                "entry_close_postal": entry_close_postal,
-                "entry_close_online": entry_close_online,
-            }
+    # Step 4 — Save full show data
+    show_data = {
+        "show": show_url,
+        "pdf": file_path,
+        "date": dt.isoformat() if dt else None,
+        "postcode": pc,
+        "duration_hr": round(drive["duration"]/3600, 2) if drive else None,
+        "distance_km": round(drive["distance"], 1) if drive else None,
+        "cost_estimate": round(cost, 2) if cost else None,
+        "points": jw_points(text, show_type),
+        "judge": judge,
+        "entry_close_postal": entry_close_postal,
+        "entry_close_online": entry_close_online,
+    }
 
-            processed_shows[show_url] = show_data
-            save_processed_shows(processed_shows)
-            return file_path
+    processed_shows[show_url] = show_data
+    save_processed_shows(processed_shows)
+    return file_path
 
-        except Exception as e:
-            print(f"[ERROR] Playwright crashed entirely for {show_url}: {e}")
-            print(f"[ERROR] Failed to process {show_url}: {e}")
-            processed_shows[show_url] = {"error": str(e)}
-            save_processed_shows(processed_shows)
-            return None
-
+except Exception as e:
+    print(f"[ERROR] Playwright crashed entirely for {show_url}: {e}")
+    print(f"[ERROR] Failed to process {show_url}: {e}")
+    processed_shows[show_url] = {"error": str(e)}
+    save_processed_shows(processed_shows)
+    return None
 
 # ———————————————————————————————————————————
 # full_run orchestrator
