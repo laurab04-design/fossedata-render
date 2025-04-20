@@ -326,20 +326,29 @@ def extract_judges(text: str, is_single_breed: bool) -> dict:
             affixes["both"] = affix
 
     else:
-        breed_block = extract_golden_retriever_section(text)
-        lines = breed_block.splitlines()
+        # Find all lines containing the word "golden"
+        lines = text.splitlines()
         for i, line in enumerate(lines):
-            line = line.strip()
-            if not is_valid_judge_line(line):
-                continue
-            if re.search(r'judge[s]?:', line, re.IGNORECASE):
-                match = re.search(r'judge[s]?:\s*(.+)', line, re.IGNORECASE)
-                if match:
-                    name, affix = split_judge_affix(match.group(1))
-                    if "bitch" in line.lower():
+            if "golden" in line.lower():
+                for j in range(i + 1, min(i + 6, len(lines))):
+                    next_line = lines[j].strip()
+                    if not is_valid_judge_line(next_line):
+                        continue
+                    # Try to parse a judge name from the line
+                    if re.search(r'judge[s]?:', next_line, re.IGNORECASE):
+                        match = re.search(r'judge[s]?:\s*(.+)', next_line, re.IGNORECASE)
+                        if match:
+                            name, affix = split_judge_affix(match.group(1))
+                        else:
+                            continue
+                    else:
+                        name, affix = split_judge_affix(next_line)
+
+                    # Assign to appropriate slot
+                    if "bitch" in next_line.lower():
                         judges["bitches"] = name
                         affixes["bitches"] = affix
-                    elif "dog" in line.lower():
+                    elif "dog" in next_line.lower():
                         judges["dogs"] = name
                         affixes["dogs"] = affix
                     elif not judges["both"]:
@@ -347,7 +356,6 @@ def extract_judges(text: str, is_single_breed: bool) -> dict:
                         affixes["both"] = affix
 
     return {"names": judges, "affixes": affixes}
-
 def get_show_date(text):
     m = re.search(r"Date Of Show:\s*([A-Za-z]+,\s*\d{1,2}\s+[A-Za-z]+\s+\d{4})", text)
     if m:
@@ -370,19 +378,9 @@ def get_show_date_from_title(aspx_url):
     return None
 
 def jw_points(text, show_type):
-    # Specific class codes for Delia
-    eligible_classes = [
-        "sbb",  # Special Beginners Bitch
-        "pb",   # Puppy Bitch
-        "jb",   # Junior Bitch
-        "ugb",  # Undergraduate Bitch
-        "tb"    # Tyro Bitch
-    ]
-
-    # Extract the Golden Retriever section from the text
+    eligible_classes = ["sbb", "pb", "jb", "ugb", "tb"]
     golden_section = extract_golden_retriever_section(text)
 
-    # Count how many eligible classes Delia is entered in
     count = 0
     for line in golden_section.lower().splitlines():
         for cls in eligible_classes:
@@ -390,14 +388,10 @@ def jw_points(text, show_type):
                 count += 1
                 break
 
-    # Championship shows: Multiply the number of eligible classes by 3
-    if show_type == "Championship":
-        return count * 3  # Multiply the count by 3 for potential points per class
-
-    # Open shows: Only 1 point total, regardless of how many eligible classes
-    elif show_type == "Open":
+    if show_type.lower() == "championship":
+        return count * 3
+    elif "open" in show_type.lower():
         return 1 if count > 0 else 0
-
     return 0
     
 def find_clashes_and_combos(results):
