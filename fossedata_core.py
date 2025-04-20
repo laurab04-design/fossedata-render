@@ -744,10 +744,11 @@ if shows:
             "Show", "Date", "Postcode", "Show Type",
             "Postal Close", "Online Close",
             "Distance (km)", "Time (hr)",
-            "Estimated Cost", "JW Points", "Golden Judge(s)","Judge Affix(es)" "Clash", "Combos"
+            "Estimated Cost", "JW Points", "Golden Judge(s)", "Judge Affix(es)", "Clash", "Combos"
         ])
         for s in shows:
             jt = ", ".join(f"{k}: {v}" for k, v in (s.get("judge") or {}).items())
+            at = ", ".join(f"{k}: {v}" for k, v in (s.get("judge_affix") or {}).items() if v)
             combos = "; ".join(s.get("combo_with", []))
             w.writerow([
                 s["show"], s["date"], s["postcode"], s.get("show_type", "") or "",
@@ -755,7 +756,7 @@ if shows:
                 s.get("entry_close_online", "") or "",
                 s.get("distance_km"), s.get("duration_hr"),
                 s.get("cost_estimate"), s["points"],
-                jt, "Yes" if s.get("clash") else "", combos
+                jt, at, "Yes" if s.get("clash") else "", combos
             ])
 
     upload_to_drive("results.json", "application/json")
@@ -767,4 +768,4 @@ else:
         save_travel_cache(travel_cache)
 
     print(f"[INFO] Processed {len(shows)} shows with Golden Retriever classes.")
-        return shows
+    return shows  # <-- now correctly aligned
