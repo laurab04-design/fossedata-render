@@ -664,7 +664,7 @@ def save_processed_shows(shows_data):
         print(f"[ERROR] Failed to save processed cache: {e}")
 
 
-# full_run orchestrator
+## full_run orchestrator
 async def full_run():
     global travel_cache
 
@@ -734,38 +734,38 @@ async def full_run():
     save_processed_shows(processed_shows)
     upload_to_drive("processed_shows.json", "application/json")
 
-if shows:
-    with open("results.json", "w") as f:
-        json.dump(shows, f, indent=2)
+    if shows:
+        with open("results.json", "w") as f:
+            json.dump(shows, f, indent=2)
 
-    with open("results.csv", "w", newline="") as cf:
-        w = csv.writer(cf)
-        w.writerow([
-            "Show", "Date", "Postcode", "Show Type",
-            "Postal Close", "Online Close",
-            "Distance (km)", "Time (hr)",
-            "Estimated Cost", "JW Points", "Golden Judge(s)", "Judge Affix(es)", "Clash", "Combos"
-        ])
-        for s in shows:
-            jt = ", ".join(f"{k}: {v}" for k, v in (s.get("judge") or {}).items())
-            at = ", ".join(f"{k}: {v}" for k, v in (s.get("judge_affix") or {}).items() if v)
-            combos = "; ".join(s.get("combo_with", []))
+        with open("results.csv", "w", newline="") as cf:
+            w = csv.writer(cf)
             w.writerow([
-                s["show"], s["date"], s["postcode"], s.get("show_type", "") or "",
-                s.get("entry_close_postal", "") or "",
-                s.get("entry_close_online", "") or "",
-                s.get("distance_km"), s.get("duration_hr"),
-                s.get("cost_estimate"), s["points"],
-                jt, at, "Yes" if s.get("clash") else "", combos
+                "Show", "Date", "Postcode", "Show Type",
+                "Postal Close", "Online Close",
+                "Distance (km)", "Time (hr)",
+                "Estimated Cost", "JW Points", "Golden Judge(s)", "Judge Affix(es)", "Clash", "Combos"
             ])
+            for s in shows:
+                jt = ", ".join(f"{k}: {v}" for k, v in (s.get("judge") or {}).items())
+                at = ", ".join(f"{k}: {v}" for k, v in (s.get("judge_affix") or {}).items() if v)
+                combos = "; ".join(s.get("combo_with", []))
+                w.writerow([
+                    s["show"], s["date"], s["postcode"], s.get("show_type", "") or "",
+                    s.get("entry_close_postal", "") or "",
+                    s.get("entry_close_online", "") or "",
+                    s.get("distance_km"), s.get("duration_hr"),
+                    s.get("cost_estimate"), s["points"],
+                    jt, at, "Yes" if s.get("clash") else "", combos
+                ])
 
-    upload_to_drive("results.json", "application/json")
-    upload_to_drive("results.csv", "text/csv")
-else:
-    print("[INFO] No Golden Retriever shows processed — skipping results upload.")
+        upload_to_drive("results.json", "application/json")
+        upload_to_drive("results.csv", "text/csv")
+    else:
+        print("[INFO] No Golden Retriever shows processed — skipping results upload.")
 
     if travel_updated:
         save_travel_cache(travel_cache)
 
     print(f"[INFO] Processed {len(shows)} shows with Golden Retriever classes.")
-    return shows  # <-- now correctly aligned
+    return shows
