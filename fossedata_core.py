@@ -557,8 +557,12 @@ async def download_schedule_playwright(show_url, processed_shows):
     try:
         print(f"[INFO] Launching Playwright for: {show_url}")
         async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            page = await browser.new_page()
+            try:
+                browser = await asyncio.wait_for(p.chromium.launch(headless=True), timeout=20)
+                page = await browser.new_page()
+            except asyncio.TimeoutError:
+                print(f"[TIMEOUT] Browser launch timed out for {show_url}")
+                return None
 
             await page.route("**/*", lambda route: route.abort() if any(ext in route.request.url for ext in [
                 "google-analytics.com", "images", ".css", ".woff2", ".woff", ".js", "trackers"
@@ -569,9 +573,13 @@ async def download_schedule_playwright(show_url, processed_shows):
                 print("[INFO] Loaded session state.")
 
             try:
-                await page.goto(show_url, wait_until="networkidle", timeout=20000)
+                await asyncio.wait_for(page.goto(show_url, wait_until="networkidle"), timeout=30)
+            except asyncio.TimeoutError:
+                print(f"[TIMEOUT] Page load timed out for {show_url}")
+                await browser.close()
+                return None
             except Exception as e:
-                print(f"[ERROR] Page load timeout for {show_url}: {e}")
+                print(f"[ERROR] Page load failed for {show_url}: {e}")
                 await browser.close()
                 return None
 
@@ -580,7 +588,7 @@ async def download_schedule_playwright(show_url, processed_shows):
                 if (o) o.remove();
             }""")
 
-            # Step 1 — Extract entry close dates from the page
+            # Extract entry close dates
             entry_close_postal = None
             entry_close_online = None
             try:
@@ -591,7 +599,6 @@ async def download_schedule_playwright(show_url, processed_shows):
                         continue
                     key = (await cells[0].inner_text()).strip().lower()
                     val = (await cells[1].inner_text()).strip()
-
                     if "postal entries close" in key and "closed" not in val.lower():
                         entry_close_postal = val
                     elif "online entries close" in key and "closed" not in val.lower():
@@ -599,7 +606,7 @@ async def download_schedule_playwright(show_url, processed_shows):
             except Exception as e:
                 print(f"[WARN] Failed to extract entry close dates: {e}")
 
-            # Step 2 — Attempt PDF download via button
+            # PDF download button
             try:
                 await page.wait_for_selector("#ctl00_ContentPlaceHolder_btnDownloadSchedule", timeout=5000)
                 async with page.expect_download(timeout=10000) as dl:
@@ -612,35 +619,40 @@ async def download_schedule_playwright(show_url, processed_shows):
                 await browser.close()
                 print(f"[INFO] Downloaded: {file_path}")
             except Exception as e:
-                print(f"[WARN] Download click failed for {show_url}: {e}")
+                print(f"[WARN] Download click failed: {e}")
                 print("[INFO] Attempting fallback POST...")
 
-                # Fallback PDF via form POST
-                form_data = await page.evaluate("""() => {
-                    const data = {};
-                    for (const [k,v] of new FormData(document.querySelector('#aspnetForm'))) {
-                        data[k] = v;
-                    }
-                    return data;
-                }""")
-                resp = await page.context.request.post(show_url, data=form_data)
-                ct = resp.headers.get("content-type", "")
-                if resp.ok and "application/pdf" in ct:
-                    pdfb = await resp.body()
-                    fname = show_url.rsplit("/", 1)[-1].replace(".aspx", ".pdf")
-                    file_path = os.path.join(CACHE_DIR, fname)
-                    with open(file_path, "wb") as f:
-                        f.write(pdfb)
-                    await save_storage_state(page)
-                    await browser.close()
-                    print(f"[INFO] Fallback PDF saved: {file_path}")
-                else:
-                    print(f"[ERROR] Fallback POST failed: {resp.status} {ct}")
+                # Fallback download
+                try:
+                    form_data = await page.evaluate("""() => {
+                        const data = {};
+                        for (const [k,v] of new FormData(document.querySelector('#aspnetForm'))) {
+                            data[k] = v;
+                        }
+                        return data;
+                    }""")
+                    resp = await page.context.request.post(show_url, data=form_data)
+                    ct = resp.headers.get("content-type", "")
+                    if resp.ok and "application/pdf" in ct:
+                        pdfb = await resp.body()
+                        fname = show_url.rsplit("/", 1)[-1].replace(".aspx", ".pdf")
+                        file_path = os.path.join(CACHE_DIR, fname)
+                        with open(file_path, "wb") as f:
+                            f.write(pdfb)
+                        await save_storage_state(page)
+                        await browser.close()
+                        print(f"[INFO] Fallback PDF saved: {file_path}")
+                    else:
+                        print(f"[ERROR] Fallback POST failed: {resp.status} {ct}")
+                        await browser.close()
+                        return None
+                except Exception as e:
+                    print(f"[ERROR] Fallback crash: {e}")
                     await browser.close()
                     return None
 
             try:
-                # Step 3 — Extract data from the PDF
+                # Extract data from the PDF
                 text = extract_text_from_pdf(file_path)
                 pc = get_postcode(text)
                 drive = get_drive(HOME_POSTCODE, pc, travel_cache) if pc else None
@@ -649,7 +661,6 @@ async def download_schedule_playwright(show_url, processed_shows):
                 dt = get_show_date(text)
                 show_type = get_show_type(text)
 
-                # Step 4 — Save full show data
                 show_data = {
                     "show": show_url,
                     "pdf": file_path,
@@ -667,15 +678,14 @@ async def download_schedule_playwright(show_url, processed_shows):
                 processed_shows[show_url] = show_data
                 save_processed_shows(processed_shows)
                 return file_path
-
             except Exception as e:
-                print(f"[ERROR] Playwright crashed entirely for {show_url}: {e}")
-                print(f"[ERROR] Failed to process {show_url}: {e}")
+                print(f"[ERROR] Final crash after download: {e}")
                 processed_shows[show_url] = {"error": str(e)}
                 save_processed_shows(processed_shows)
                 return None
+
     except Exception as e:
-        print(f"[ERROR] Uncaught error during Playwright run for {show_url}: {e}")
+        print(f"[ERROR] Uncaught error for {show_url}: {e}")
         return None
 # ———————————————————————————————————————————
 # full_run orchestrator
