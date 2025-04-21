@@ -543,19 +543,20 @@ def fetch_aspx_links():
 # playwright download again
 # ——————————————————————————————————————————
 async def download_schedule_playwright(show_url, processed_shows):
+    # Check if already processed
     if is_show_processed(show_url, processed_shows):
-        cached_pdf_path = processed_shows[show_url]
-        if os.path.exists(cached_pdf_path):
+        cached = processed_shows[show_url]
+        cached_pdf_path = cached["pdf"] if isinstance(cached, dict) and "pdf" in cached else None
+        if cached_pdf_path and os.path.exists(cached_pdf_path):
             print(f"[INFO] Skipping {show_url} — already processed.")
             return cached_pdf_path
         else:
-            print(f"[WARN] Cached file for {show_url} missing, re-downloading...")
+            print(f"[WARN] Cached file for {show_url} missing or invalid, re-downloading...")
 
     cache_filename = os.path.join(CACHE_DIR, f"{show_url.split('/')[-1].replace('.aspx', '.pdf')}")
-
     if os.path.exists(cache_filename):
         print(f"[INFO] Skipping {show_url} - already downloaded.")
-        processed_shows[show_url] = cache_filename
+        processed_shows[show_url] = {"pdf": cache_filename}
         save_processed_shows(processed_shows)
         return cache_filename
 
@@ -611,7 +612,7 @@ async def download_schedule_playwright(show_url, processed_shows):
             except Exception as e:
                 print(f"[WARN] Failed to extract entry close dates: {e}")
 
-            # PDF download button
+            # Attempt PDF download via button
             try:
                 await page.wait_for_selector("#ctl00_ContentPlaceHolder_btnDownloadSchedule", timeout=5000)
                 async with page.expect_download(timeout=10000) as dl:
@@ -626,8 +627,6 @@ async def download_schedule_playwright(show_url, processed_shows):
             except Exception as e:
                 print(f"[WARN] Download click failed: {e}")
                 print("[INFO] Attempting fallback POST...")
-
-                # Fallback download
                 try:
                     form_data = await page.evaluate("""() => {
                         const data = {};
@@ -656,8 +655,8 @@ async def download_schedule_playwright(show_url, processed_shows):
                     await browser.close()
                     return None
 
+            # Final extraction
             try:
-                # Extract data from the PDF
                 text = extract_text_from_pdf(file_path)
                 pc = get_postcode(text)
                 drive = get_drive(HOME_POSTCODE, pc, travel_cache) if pc else None
