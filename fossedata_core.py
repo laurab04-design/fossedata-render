@@ -659,7 +659,9 @@ async def download_schedule_playwright(show_url, processed_shows):
                 processed_shows[show_url] = {"error": str(e)}
                 save_processed_shows(processed_shows)
                 return None
-
+    except Exception as e:
+        print(f"[ERROR] Uncaught error during Playwright run for {show_url}: {e}")
+        return None
 # ———————————————————————————————————————————
 # full_run orchestrator
 # ———————————————————————————————————————————
@@ -674,9 +676,6 @@ def save_processed_shows(shows_data):
         print(f"[DEBUG] File exists after write? {Path('processed_shows.json').exists()}")
     except Exception as e:
         print(f"[ERROR] Failed to save processed cache: {e}")
-    finally:
-        pass  # Obligatory appeasement of the Python gods
-
 
 # Download a file from Google Drive
 def download_from_drive(filename, mime_type="application/json"):
