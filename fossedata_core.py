@@ -313,7 +313,8 @@ def extract_judges(text: str, is_single_breed: bool) -> dict:
         affix_match = re.search(r'\(([^)]+)\)', name)
         affix = affix_match.group(1).strip() if affix_match else None
         name = re.sub(r'\(.*?\)', '', name).strip()
-        name = re.split(r',|\d+|puppy|junior|novice|graduate|post ?graduate|open|limit|yearling', name, flags=re.IGNORECASE)[0].strip()
+        name = re.split(r',|\d+|puppy|junior|novice|graduate|post ?graduate|open|limit|yearling',
+                        name, flags=re.IGNORECASE)[0].strip()
         return name, affix
 
     def is_valid_judge_line(line: str) -> bool:
@@ -341,29 +342,32 @@ def extract_judges(text: str, is_single_breed: bool) -> dict:
             affixes["both"] = affix
 
     else:
-        # Find all lines containing the word "golden"
         lines = text.splitlines()
         for i, line in enumerate(lines):
             if "golden" in line.lower():
-                for j in range(i + 1, min(i + 6, len(lines))):
-                    next_line = lines[j].strip()
-                    if not is_valid_judge_line(next_line):
+                # Pull surrounding context lines in case judge name is above or below
+                context = lines[max(0, i - 2): i + 6]
+                for ctx_line in context:
+                    ctx_line = ctx_line.strip()
+                    if not is_valid_judge_line(ctx_line):
                         continue
-                    # Try to parse a judge name from the line
-                    if re.search(r'judge[s]?:', next_line, re.IGNORECASE):
-                        match = re.search(r'judge[s]?:\s*(.+)', next_line, re.IGNORECASE)
-                        if match:
-                            name, affix = split_judge_affix(match.group(1))
-                        else:
-                            continue
-                    else:
-                        name, affix = split_judge_affix(next_line)
 
-                    # Assign to appropriate slot
-                    if "bitch" in next_line.lower():
+                    # If it has "judge", use what follows
+                    if re.search(r'judge[s]?:', ctx_line, re.IGNORECASE):
+                        match = re.search(r'judge[s]?:\s*(.+)', ctx_line, re.IGNORECASE)
+                        judge_raw = match.group(1) if match else None
+                    else:
+                        judge_raw = ctx_line
+
+                    if not judge_raw:
+                        continue
+
+                    name, affix = split_judge_affix(judge_raw)
+
+                    if "bitch" in ctx_line.lower():
                         judges["bitches"] = name
                         affixes["bitches"] = affix
-                    elif "dog" in next_line.lower():
+                    elif "dog" in ctx_line.lower():
                         judges["dogs"] = name
                         affixes["dogs"] = affix
                     elif not judges["both"]:
@@ -371,6 +375,7 @@ def extract_judges(text: str, is_single_breed: bool) -> dict:
                         affixes["both"] = affix
 
     return {"names": judges, "affixes": affixes}
+    
 def get_show_date(text):
     m = re.search(r"Date Of Show:\s*([A-Za-z]+,\s*\d{1,2}\s+[A-Za-z]+\s+\d{4})", text)
     if m:
