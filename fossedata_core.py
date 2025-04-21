@@ -674,6 +674,8 @@ def save_processed_shows(shows_data):
         print(f"[DEBUG] File exists after write? {Path('processed_shows.json').exists()}")
     except Exception as e:
         print(f"[ERROR] Failed to save processed cache: {e}")
+    finally:
+        pass  # Obligatory appeasement of the Python gods
 
 
 # Download a file from Google Drive
