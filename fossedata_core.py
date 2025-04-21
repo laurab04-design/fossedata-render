@@ -13,6 +13,7 @@ from playwright.async_api import async_playwright
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
+from PyPDF2 import PdfReader
 
 # ———————————————————————————————————————————
 # Decode & write Google service account creds
@@ -275,13 +276,27 @@ def estimate_cost(dist_km, dur_s):
     fuel = gal * 4.54609 * price
     return fuel + OVERNIGHT_COST if dur_s > OVERNIGHT_THRESHOLD_HOURS * 3600 else fuel
 
-def get_show_type(text):
+def get_show_type(text, file_path=None):
     lines = text.lower().splitlines()
     for line in lines[:20]:  # Top of the file only
-        if "championship show" in line:
+        if "championship" in line:
             return "Championship"
-        if "premier open show" in line or "open show" in line:
+        if "premier open" in line or "open show" in line:
             return "Open"
+
+    # Fallback: check raw PDF first page if file path is provided
+    if file_path:
+        try:
+            from PyPDF2 import PdfReader
+            reader = PdfReader(file_path)
+            first_page_text = reader.pages[0].extract_text().lower()
+            if "championship" in first_page_text:
+                return "Championship"
+            if "premier open" in first_page_text or "open show" in first_page_text:
+                return "Open"
+        except Exception as e:
+            print(f"[WARN] get_show_type fallback failed on {file_path}: {e}")
+
     return "Unknown"
 
 def extract_golden_retriever_section(text: str) -> str:
