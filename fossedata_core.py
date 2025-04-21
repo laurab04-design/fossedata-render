@@ -861,6 +861,7 @@ async def full_run():
 
         upload_to_drive("results.json", "application/json")
         upload_to_drive("results.csv", "text/csv")
+        upload_to_drive("aspx_links.txt", "text/plain")
     else:
         print("[INFO] No Golden Retriever shows processed — skipping results upload.")
 
