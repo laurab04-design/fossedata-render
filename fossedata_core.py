@@ -24,6 +24,12 @@ from collections import defaultdict
 
 load_dotenv()
 
+# ===== Load Environment Variables Correctly =====
+DOG_NAME = os.getenv("DOG_NAME")
+DOG_DOB = date_parse(os.getenv("DOG_DOB")).date()
+MPG = int(os.getenv("MPG"))
+MAX_PAIR_GAP_MINUTES = int(os.getenv("MAX_PAIR_GAP_MINUTES"))
+
 # ===== Constants =====
 LITERS_PER_GALLON = 4.54609
 PUPPY_CUTOFF = DOG_DOB.replace(year=DOG_DOB.year + 1)
@@ -38,12 +44,6 @@ CLASH_OVERNIGHT_CSV = "clashes_overnight.csv"
 
 processed_shows = set()
 travel_cache = {}
-
-# ===== Load Environment Variables Correctly =====
-DOG_NAME = os.getenv("DOG_NAME")
-DOG_DOB = date_parse(os.getenv("DOG_DOB")).date()
-MPG = int(os.getenv("MPG"))
-MAX_PAIR_GAP_MINUTES = int(os.getenv("MAX_PAIR_GAP_MINUTES", "75"))
 
 # These come in as strings, so we convert:
 HANDLER_HAS_CC = os.getenv("HANDLER_HAS_CC", "false").lower() == "true"
