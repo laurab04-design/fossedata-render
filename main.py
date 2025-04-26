@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
-import os, subprocess, asyncio
+import os
+import subprocess
+import asyncio
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, BackgroundTasks
-from fossedata_core import full_run
+from fossedata_core import full_run   # <-- make sure this exists!
 
-# make sure Playwright uses its vendored browsers
+# ensure Playwright uses vendored browsers
 os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "0"
 
-# install Chromium if missing
+# install Chromium if missing (you can also bake this into your Dockerfile)
 CHROMIUM = Path("/opt/render/.cache/ms-playwright/chromium")
 if not CHROMIUM.exists():
     subprocess.run(["playwright", "install", "chromium"], check=False)
 
-# instantiate the app **before** any @app.*
+# --- instantiate app BEFORE any @app.<method> ---
 app = FastAPI()
 
 
@@ -21,8 +23,11 @@ async def root():
     return {"status": "ok", "message": "FosseData is up"}
 
 
-@app.post("/run")      # now POST /run really exists
+@app.post("/run")
 async def run_sync():
+    """
+    Blocks until your full_run() finishes. Returns how many shows processed.
+    """
     try:
         results = await full_run()
         return {"processed": len(results)}
@@ -32,6 +37,8 @@ async def run_sync():
 
 @app.post("/run_bg")
 async def run_bg(background_tasks: BackgroundTasks):
-    # background scrape
+    """
+    Kicks off full_run() in the background (non-blocking).
+    """
     background_tasks.add_task(asyncio.create_task, full_run())
     return {"status": "started", "message": "Background scrape kicked off"}
