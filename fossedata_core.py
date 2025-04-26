@@ -872,7 +872,7 @@ def calculate_diesel_cost(distance_miles: float, price_per_litre: float, mpg: in
 
 --- a/fossedata_core.py
 +++ b/fossedata_core.py
-@@
+
 - def full_run():
 + async def full_run():
      """Fetch shows, process them, detect clashes/overnights, save & upload."""
@@ -893,7 +893,6 @@ def calculate_diesel_cost(distance_miles: float, price_per_litre: float, mpg: in
 
      # 2) process each show
      results = main_processing_loop(show_list)
-@@
 - if __name__ == "__main__":
 -    final = full_run()
 + if __name__ == "__main__":
