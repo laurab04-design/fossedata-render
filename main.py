@@ -7,6 +7,12 @@ import asyncio
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fossedata_core import full_run
 
+@app.post("/run")
+async def run_endpoint():
+    # if you want to call it inside FastAPI
+    results = await asyncio.to_thread(full_run)
+    return {"processed": len(results)}
+
 # Ensure Playwright uses its vendored browsers
 os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "0"
 
