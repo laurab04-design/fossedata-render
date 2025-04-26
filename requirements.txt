@@ -11,4 +11,4 @@ beautifulsoup4>=4.9
 python-dateutil>=2.8
 PyMuPDF>=1.18
 PyPDF2>=3.0.0
-python-dotenv
+python-dotenv>=0.19.0
