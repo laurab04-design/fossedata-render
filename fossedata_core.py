@@ -870,37 +870,33 @@ def calculate_diesel_cost(distance_miles: float, price_per_litre: float, mpg: in
     return round(litres_needed * price_per_litre, 2)
 
 
-# ======== ENTRYPOINT =========
+--- a/fossedata_core.py
++++ b/fossedata_core.py
+@@
+- def full_run():
++ async def full_run():
+     """Fetch shows, process them, detect clashes/overnights, save & upload."""
+     # 1) fetch the list of shows
+     from playwright.async_api import async_playwright
 
-def full_run():
-    """Fetch shows, process them, detect clashes/overnights, save & upload."""
-    # 1) fetch the list of shows
-    from playwright.async_api import async_playwright
+     async def _get_shows():
+         async with async_playwright() as pw:
+             browser = await pw.chromium.launch()
+             page = await browser.new_page()
+             shows = await fetch_show_list(page)
+             await browser.close()
+             return shows
 
-    async def _get_shows():
-        async with async_playwright() as pw:
-            browser = await pw.chromium.launch()
-            page = await browser.new_page()
-            shows = await fetch_show_list(page)
-            await browser.close()
-            return shows
+-    show_list = asyncio.run(_get_shows())
++    # just await it instead of spinning up a nested loop
++    show_list = await _get_shows()
 
-    show_list = asyncio.run(_get_shows())
-
-    # 2) process each show
-    results = main_processing_loop(show_list)
-
-    # 3) detect clashes & overnight chains
-    clashes = detect_clashes(results)
-    overnights = detect_overnight_pairs(results, travel_cache)
-
-    # 4) save & upload
-    save_results(results, clashes, overnights, travel_cache, processed_shows)
-    upload_to_google_drive()
-
-    return results
-
-# if you ever run fossedata_core.py directly:
-if __name__ == "__main__":
-    final = full_run()
-    print(f"Processed {len(final)} shows.")
+     # 2) process each show
+     results = main_processing_loop(show_list)
+@@
+- if __name__ == "__main__":
+-    final = full_run()
++ if __name__ == "__main__":
++    import asyncio
++    final = asyncio.run(full_run())
+     print(f"Processed {len(final)} shows.")
