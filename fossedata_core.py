@@ -1,963 +1,871 @@
-# ---------------------------------------------
-# GOOGLE DRIVE SETUP
-# ---------------------------------------------
+# ===== Cleaned FosseData Script (In Progress) =====
+# This is the deduplicated, cleaned version up to the eligibility logic section.
+
 import os
+import io
 import re
 import csv
 import json
 import base64
 import requests
 import datetime
-import asyncio
 import pdfplumber
+import asyncio
 from pathlib import Path
 from bs4 import BeautifulSoup
-from playwright.async_api import async_playwright
+from dotenv import load_dotenv
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
-from PyPDF2 import PdfReader
 from dateutil.parser import parse as date_parse
+from playwright.async_api import async_playwright
+from typing import List, Tuple, Optional
+from collections import defaultdict
 
-# Decode and write service account credentials
-creds_b64 = os.environ.get("GOOGLE_SERVICE_ACCOUNT_BASE64")
-if creds_b64:
-    with open("credentials.json", "wb") as f:
-        f.write(base64.b64decode(creds_b64))
-else:
-    print("GOOGLE_SERVICE_ACCOUNT_BASE64 is not set.")
+load_dotenv()
 
-SCOPES = ["https://www.googleapis.com/auth/drive.file"]
-credentials = service_account.Credentials.from_service_account_file("credentials.json", scopes=SCOPES)
-drive_service = build("drive", "v3", credentials=credentials)
+# ===== Constants =====
+LITERS_PER_GALLON = 4.54609
+PUPPY_CUTOFF = DOG_DOB.replace(year=DOG_DOB.year + 1)
+JW_CUTOFF = DOG_DOB + datetime.timedelta(days=548)
 
-# ---------------------------------------------
-# GOOGLE DRIVE UPLOAD / DOWNLOAD
-# ---------------------------------------------
-def upload_to_drive(local_path, mime_type="application/json"):
-    fname = os.path.basename(local_path)
-    folder_id = os.environ.get("GDRIVE_FOLDER_ID")
-    if not os.path.exists(local_path):
-        print(f"[ERROR] File not found: {local_path}")
-        return
-    if not folder_id:
-        print("[ERROR] GDRIVE_FOLDER_ID is not set.")
-        return
-    try:
-        res = drive_service.files().list(
-            q=f"name='{fname}' and trashed=false and '{folder_id}' in parents",
-            spaces="drive", fields="files(id, name)"
-        ).execute()
-        if res["files"]:
-            file_id = res["files"][0]["id"]
-            drive_service.files().update(
-                fileId=file_id,
-                media_body=MediaFileUpload(local_path, mimetype=mime_type)
-            ).execute()
-            print(f"[INFO] Updated {fname} in Drive.")
-        else:
-            file = drive_service.files().create(
-                body={"name": fname, "parents": [folder_id]},
-                media_body=MediaFileUpload(local_path, mimetype=mime_type),
-                fields="id, webViewLink"
-            ).execute()
-            print(f"[INFO] Uploaded {fname} to Drive.")
-            print(f"[LINK] View: {file['webViewLink']}")
-    except Exception as e:
-        print(f"[ERROR] Drive upload failed: {e}")
-
-def download_from_drive(filename):
-    folder_id = os.environ.get("GDRIVE_FOLDER_ID")
-    if not folder_id:
-        print("[ERROR] GDRIVE_FOLDER_ID is not set.")
-        return
-    try:
-        res = drive_service.files().list(
-            q=f"name='{filename}' and trashed=false and '{folder_id}' in parents",
-            spaces="drive", fields="files(id, name)"
-        ).execute()
-        if res["files"]:
-            file_id = res["files"][0]["id"]
-            request = drive_service.files().get_media(fileId=file_id)
-            with open(filename, "wb") as f:
-                downloader = MediaFileUpload(filename)
-                downloader = build("drive", "v3", credentials=credentials).files().get_media(fileId=file_id)
-                request.execute()
-            print(f"[INFO] Downloaded {filename} from Drive.")
-    except Exception as e:
-        print(f"[ERROR] Failed to download {filename} from Drive: {e}")
-
-# ---------------------------------------------
-# ENV CONFIG AND CONSTANTS
-# ---------------------------------------------
-HOME_POSTCODE = os.environ.get("HOME_POSTCODE", "YO8 9NA")
-GOOGLE_MAPS_API_KEY = os.environ.get("GOOGLE_MAPS_API_KEY")
-DOG_DOB = datetime.datetime.strptime(os.environ.get("DOG_DOB", "2024-05-15"), "%Y-%m-%d").date()
-DOG_NAME = os.environ.get("DOG_NAME", "Delia")
-MPG = float(os.environ.get("MPG", 40))
-OVERNIGHT_THRESHOLD_HOURS = float(os.environ.get("OVERNIGHT_THRESHOLD_HOURS", 3))
-OVERNIGHT_COST = float(os.environ.get("OVERNIGHT_COST", 100))
-CACHE_FILE = "processed_shows.json"
+PROCESSED_SHOWS_FILE = "processed_shows.json"
 TRAVEL_CACHE_FILE = "travel_cache.json"
-CACHE_DIR = "downloaded_pdfs"
-os.makedirs(CACHE_DIR, exist_ok=True)
+STORAGE_STATE_FILE = "storage_state.json"
+RESULTS_CSV = "results.csv"
+RESULTS_JSON = "results.json"
+CLASH_OVERNIGHT_CSV = "clashes_overnight.csv"
 
-# ---------------------------------------------
-# CONTINUED: FULL CLEANED SCRIPT (PRICING EXTRACTION AND COST CALCULATION LOGIC)
-# ---------------------------------------------
-def extract_entry_pricing(text):
-    """Extracts entry pricing and catalogue costs from schedule text. Assumes non-member rates."""
-    lines = text.lower().splitlines()
-    pricing = {
-        "first_entry": None,
-        "additional_entry": None,
-        "catalogue": None
-    }
+processed_shows = set()
+travel_cache = {}
 
-    for line in lines:
-        if "first entry" in line and re.search(r"£?\d+(\.\d{2})?", line):
-            match = re.search(r"£?\s*(\d+(\.\d{2})?)", line)
-            if match:
-                pricing["first_entry"] = float(match.group(1))
-        elif ("each subsequent" in line or "subsequent entries" in line) and re.search(r"£?\d+(\.\d{2})?", line):
-            match = re.search(r"£?\s*(\d+(\.\d{2})?)", line)
-            if match:
-                pricing["additional_entry"] = float(match.group(1))
-        elif "catalogue" in line and re.search(r"£?\d+(\.\d{2})?", line):
-            match = re.search(r"£?\s*(\d+(\.\d{2})?)", line)
-            if match:
-                pricing["catalogue"] = float(match.group(1))
+# ===== Load Environment Variables Correctly =====
+DOG_NAME = os.getenv("DOG_NAME")
+DOG_DOB = date_parse(os.getenv("DOG_DOB")).date()
+MPG = int(os.getenv("MPG"))
+MAX_PAIR_GAP_MINUTES = int(os.getenv("MAX_PAIR_GAP_MINUTES", "75"))
 
-    # Set defaults if not found
-    if pricing["first_entry"] is None:
-        pricing["first_entry"] = 5.0
-    if pricing["additional_entry"] is None:
-        pricing["additional_entry"] = pricing["first_entry"]
-    if pricing["catalogue"] is None:
-        pricing["catalogue"] = 3.0
+# These come in as strings, so we convert:
+HANDLER_HAS_CC = os.getenv("HANDLER_HAS_CC", "false").lower() == "true"
+DOG_HAS_SGWC = os.getenv("DOG_HAS_SGWC", "false").lower() == "true"
+DOG_HAS_GCDS = os.getenv("DOG_HAS_GCDS", "false").lower() == "true"
 
-    return pricing
+# These are CSV strings, so we split them:
+CC_TRIGGER_WORDS = [w.strip().lower() for w in os.getenv("CC_TRIGGER_WORDS", "").split(",") if w.strip()]
+RCC_TRIGGER_WORDS = [w.strip().lower() for w in os.getenv("RCC_TRIGGER_WORDS", "").split(",") if w.strip()]
 
-def calculate_entry_cost(text, show_type, show_date):
-    """Calculates the total entry cost including catalogue, based on class eligibility."""
-    pricing = extract_entry_pricing(text)
-    eligible_classes = get_eligible_classes(text, show_type, show_date)
-    num_classes = len(eligible_classes)
-
-    if num_classes == 0:
-        return {
-            "entry_cost": 0,
-            "catalogue_cost": pricing["catalogue"],
-            "total_cost": pricing["catalogue"]
-        }
-
-    first_entry = pricing["first_entry"]
-    additional_entry = pricing["additional_entry"]
-    entry_cost = first_entry + additional_entry * (num_classes - 1)
-    total_cost = entry_cost + pricing["catalogue"]
-
-    return {
-        "entry_cost": round(entry_cost, 2),
-        "catalogue_cost": pricing["catalogue"],
-        "total_cost": round(total_cost, 2)
-    }
-
-def get_eligible_classes(text, show_type, show_date):
-    """Determines eligible classes for Delia based on age and show type."""
-    text = text.lower()
-    eligible_classes = []
-    eligible_codes = ["sbb", "ugb", "tb", "yb"]
-    age_in_months = (show_date.year - DOG_DOB.year) * 12 + (show_date.month - DOG_DOB.month)
-
-    if show_date < datetime.date(2025, 5, 15):
-        eligible_codes.append("pb")
-    if datetime.date(2025, 5, 15) <= show_date < datetime.date(2026, 5, 15):
-        eligible_codes.append("jb")
-
-    golden_section = extract_golden_retriever_section(text).lower()
-
-    if show_type.lower() == "championship":
-        for line in golden_section.splitlines():
-            for code in eligible_codes:
-                if re.search(rf'\b{re.escape(code)}\b', line):
-                    eligible_classes.append(code)
-                    break
-    else:  # Open / Premier Open / Limited
-        found_mixed = False
-        for keyword in ["puppy", "junior", "yearling"]:
-            if keyword in golden_section:
-                eligible_classes.append(keyword)
-                found_mixed = True
-        if not found_mixed:
-            for line in golden_section.splitlines():
-                for code in eligible_codes:
-                    if re.search(rf'\b{re.escape(code)}\b', line):
-                        eligible_classes.append(code)
-                        break
-
-    return list(set(eligible_classes))  # remove duplicates
-
-# ---------------------------------------------
-# CONTINUED: SHOW SCRAPING AND PROCESSING LOGIC
-# ---------------------------------------------
-
-async def download_schedule_playwright(show_url, processed_shows, travel_cache):
-    """Downloads and processes the schedule PDF using Playwright."""
-    if is_show_processed(show_url, processed_shows):
-        cached = processed_shows[show_url]
-        if isinstance(cached, dict) and "pdf" in cached and os.path.exists(cached["pdf"]):
-            print(f"[INFO] Skipping {show_url} — already processed.")
-            return cached["pdf"], cached
-        else:
-            print(f"[WARN] Cached file missing or invalid for {show_url}, re-downloading...")
-
-    filename = show_url.split("/")[-1].replace(".aspx", ".pdf")
-    local_path = os.path.join(CACHE_DIR, filename)
-    if os.path.exists(local_path):
-        print(f"[INFO] Skipping {show_url} — already downloaded.")
-        return local_path, processed_shows[show_url]
-
+# ===== Load Cache =====
+if os.path.isfile(PROCESSED_SHOWS_FILE):
     try:
-        print(f"[INFO] Launching Playwright for: {show_url}")
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            context = await browser.new_context()
-            if Path("storage_state.json").exists():
-                await load_storage_state(context)
-            page = await context.new_page()
-
-            await page.route("**/*", lambda route: route.abort() if any(ext in route.request.url for ext in [".css", ".woff", ".jpg", "analytics"]) else route.continue_())
-
-            try:
-                await asyncio.wait_for(page.goto(show_url, wait_until="networkidle"), timeout=30)
-            except asyncio.TimeoutError:
-                print(f"[TIMEOUT] Page load failed for {show_url}")
-                await browser.close()
-                return None, None
-
-            await page.evaluate("""() => { const o = document.getElementById('cookiescript_injected_wrapper'); if (o) o.remove(); }""")
-
-            # Extract entry close dates
-            entry_close_postal = None
-            entry_close_online = None
-            try:
-                rows = await page.query_selector_all("table tr")
-                for row in rows:
-                    cells = await row.query_selector_all("td")
-                    if len(cells) < 2:
-                        continue
-                    key = (await cells[0].inner_text()).strip().lower()
-                    val = (await cells[1].inner_text()).strip()
-                    if "postal entries close" in key and "closed" not in val.lower():
-                        entry_close_postal = val
-                    elif "online entries close" in key and "closed" not in val.lower():
-                        entry_close_online = val
-            except Exception as e:
-                print(f"[WARN] Failed to parse entry close table: {e}")
-
-            # Try PDF download
-            try:
-                await page.wait_for_selector("#ctl00_ContentPlaceHolder_btnDownloadSchedule", timeout=5000)
-                async with page.expect_download(timeout=10000) as dl:
-                    await page.click("#ctl00_ContentPlaceHolder_btnDownloadSchedule")
-                download = await dl.value
-                await download.save_as(local_path)
-                await save_storage_state(page)
-                await browser.close()
-                print(f"[INFO] Downloaded: {local_path}")
-            except Exception as e:
-                print(f"[WARN] Button download failed: {e}")
-                print("[INFO] Attempting fallback POST...")
-                try:
-                    form_data = await page.evaluate("""() => { const data = {}; for (const [k, v] of new FormData(document.querySelector('#aspnetForm'))) { data[k] = v; } return data; }""")
-                    resp = await page.context.request.post(show_url, data=form_data)
-                    if resp.ok and "application/pdf" in resp.headers.get("content-type", ""):
-                        content = await resp.body()
-                        with open(local_path, "wb") as f:
-                            f.write(content)
-                        await save_storage_state(page)
-                        await browser.close()
-                        print(f"[INFO] Fallback PDF saved: {local_path}")
-                    else:
-                        print(f"[ERROR] Fallback POST failed: {resp.status}")
-                        await browser.close()
-                        return None, None
-                except Exception as e:
-                    print(f"[ERROR] Fallback crash: {e}")
-                    await browser.close()
-                    return None, None
-
-            # Process PDF
-            try:
-                text = extract_text_from_pdf(local_path)
-                pc = get_postcode(text)
-                drive = get_drive(HOME_POSTCODE, pc, travel_cache) if pc else None
-                cost = estimate_cost(drive["distance"], drive["duration"]) if drive else None
-                judge = extract_judges(text, is_single_breed="single breed" in text.lower())
-                dt = get_show_date(text) or get_show_date_from_title(show_url)
-                show_type = get_show_type(text, file_path=local_path)
-                points = calculate_jw_points(text, show_type, dt) if dt else 0
-
-                entry_costs = calculate_entry_cost(text, show_type, dt)
-                total_cost = (cost or 0) + entry_costs["total_cost"]
-
-                show_data = {
-                    "show": show_url,
-                    "pdf": local_path,
-                    "date": dt.isoformat() if dt else None,
-                    "postcode": pc,
-                    "duration_hr": round(drive["duration"] / 3600, 2) if drive else None,
-                    "distance_km": round(drive["distance"], 1) if drive else None,
-                    "cost_estimate": round(cost, 2) if cost else None,
-                    "diesel_cost": round(cost, 2) if cost else None,
-                    "entry_cost": round(entry_costs["entry_cost"], 2) if entry_costs else None,
-                    "catalogue_cost": round(entry_costs["catalogue_cost"], 2) if entry_costs else None,
-                    "total_cost": round(total_cost, 2) if total_cost else None,
-                    "points": points,
-                    "judge": judge,
-                    "entry_close_postal": entry_close_postal,
-                    "entry_close_online": entry_close_online,
-                    "show_type": show_type
-                }
-
-                processed_shows[show_url] = show_data
-                save_processed_shows(processed_shows)
-                return local_path, show_data
-            except Exception as e:
-                print(f"[ERROR] Processing failed after download for {show_url}: {e}")
-                processed_shows[show_url] = {"error": str(e)}
-                save_processed_shows(processed_shows)
-                return None, None
-
+        with open(PROCESSED_SHOWS_FILE, "r") as f:
+            data = json.load(f)
+            processed_shows = set(data if isinstance(data, list) else data.keys())
     except Exception as e:
-        print(f"[ERROR] Uncaught error for {show_url}: {e}")
-        return None, None
+        print(f"Warning: Could not load {PROCESSED_SHOWS_FILE}: {e}")
 
-# ---------------------------------------------
-# CONTINUED: FULL RUN LOOP AND OUTPUT GENERATION
-# ---------------------------------------------
+if os.path.isfile(TRAVEL_CACHE_FILE):
+    try:
+        with open(TRAVEL_CACHE_FILE, "r") as f:
+            travel_cache = json.load(f)
+    except Exception as e:
+        print(f"Warning: Could not load {TRAVEL_CACHE_FILE}: {e}")
+        travel_cache = {}
 
-async def full_run():
-    """Main async runner: fetches shows, processes them, and outputs CSV/JSON every 5 shows."""
-    global travel_cache
-    travel_cache = load_travel_cache()
-    download_from_drive(CACHE_FILE)
-    download_from_drive(TRAVEL_CACHE_FILE)
+if not isinstance(travel_cache, dict):
+    travel_cache = {}
 
-    processed_shows = load_processed_shows()
-    urls = fetch_aspx_links()
-    results = []
-    counter = 0
+# ===== Diesel Price =====
+def fetch_gov_diesel_price():
+    url = "https://assets.publishing.service.gov.uk/government/uploads/system/uploads/attachment_data/file/1254009/weekly-road-fuel-prices.csv"
+    try:
+        resp = requests.get(url, timeout=10)
+        if resp.status_code == 200:
+            csv_text = resp.content.decode('utf-8')
+            reader = csv.DictReader(io.StringIO(csv_text))
+            rows = list(reader)
+            latest_row = rows[-1]
+            diesel_price_ppl = latest_row.get('Diesel', '').replace('p', '').strip()
+            if diesel_price_ppl:
+                return float(diesel_price_ppl) / 100.0
+    except Exception as e:
+        print(f"Warning: Gov fuel price fetch failed: {e}")
+    return 1.57
 
-    for url in urls:
-        if is_show_processed(url, processed_shows):
-            print(f"[INFO] Skipping {url} — already processed.")
-            continue
+diesel_price_per_litre = fetch_gov_diesel_price()
+print(f"Gov diesel price: £{diesel_price_per_litre:.2f} per litre")
 
+async def fetch_show_list(page) -> List[dict]:
+    """
+    Scrape the Fosse Data site for upcoming shows.
+    Returns a list of shows with ID, name, date, venue, and type.
+    """
+    shows = []
+    await page.goto("https://www.fossedata.co.uk/shows.aspx", timeout=60000)
+    content = await page.content()
+
+    show_entries = re.findall(
+        r"(?P<date>\d{1,2} \w+ 20\d{2}).+?(?P<name>[A-Z][^<]+Show)[^<]*(?P<venue>[A-Z][^<]+)(?P<link>ShowID=\d+)?",
+        content,
+        flags=re.DOTALL
+    )
+
+    for date_str, name, venue, showid in show_entries:
         try:
-            pdf, show_data = await asyncio.wait_for(download_schedule_playwright(url, processed_shows, travel_cache), timeout=120)
-        except asyncio.TimeoutError:
-            print(f"[TIMEOUT] {url} took too long.")
-            processed_shows[url] = {"error": "timeout"}
-            save_processed_shows(processed_shows)
-            continue
+            show_date = datetime.datetime.strptime(date_str, "%d %B %Y").date()
+        except ValueError:
+            try:
+                show_date = datetime.datetime.strptime(date_str, "%d %b %Y").date()
+            except ValueError:
+                show_date = None
 
-        if not pdf or not show_data:
-            continue
+        show_name = name.strip()
+        venue = venue.strip()
+        show_type = "Unknown"
+        if "Championship Show" in show_name or "Ch. Show" in show_name:
+            show_type = "Championship"
+        elif "Open Show" in show_name or "Premier" in show_name:
+            show_type = "Premier Open" if "Premier" in show_name else "Open"
 
-        text = extract_text_from_pdf(pdf)
-        if "golden" not in text.lower():
-            print(f"[INFO] Skipping {pdf} — no 'golden' found in schedule text.")
-            processed_shows[url] = {"pdf": pdf}
-            save_processed_shows(processed_shows)
-            continue
+        show_id = showid.strip() if showid else f"{show_name}_{show_date}"
 
-        pc = get_postcode(text)
-        drive = get_drive(HOME_POSTCODE, pc, travel_cache) if pc else None
-        cost = estimate_cost(drive["distance"], drive["duration"]) if drive else None
-        judge = extract_judges(text, is_single_breed="single breed" in text.lower())
-        dt = get_show_date(text) or get_show_date_from_title(url)
-        show_type = get_show_type(text, file_path=pdf)
-        points = calculate_jw_points(text, show_type, dt) if dt else 0
-        entry_costs = calculate_entry_cost(text, show_type, dt)
-        total_cost = (cost or 0) + (entry_costs["total_cost"] if entry_costs else 0)
+        shows.append({
+            "id": show_id,
+            "show_name": show_name,
+            "date": show_date,
+            "venue": venue,
+            "type": show_type
+        })
 
-        result = {
-            "show": url,
-            "pdf": pdf,
-            "date": dt.isoformat() if dt else None,
-            "postcode": pc,
-            "duration_hr": round(drive["duration"] / 3600, 2) if drive else None,
-            "distance_km": round(drive["distance"], 1) if drive else None,
-            "cost_estimate": round(cost, 2) if cost else None,
-            "diesel_cost": round(cost, 2) if cost else None,
-            "entry_cost": round(entry_costs["entry_cost"], 2) if entry_costs else None,
-            "catalogue_cost": round(entry_costs["catalogue_cost"], 2) if entry_costs else None,
-            "total_cost": round(total_cost, 2) if total_cost else None,
-            "points": points,
-            "judge": judge,
-            "entry_close_postal": show_data.get("entry_close_postal"),
-            "entry_close_online": show_data.get("entry_close_online"),
-            "show_type": show_type
-        }
+    return shows
 
-        results.append(result)
-        processed_shows[url] = result
-        counter += 1
-
-        # Update outputs every 5 processed shows
-        if counter % 5 == 0:
-            print(f"[INFO] Processed {counter} shows — updating outputs...")
-            clashes, overnight_pairs = detect_clashes_and_overnight_combos(results)
-            save_travel_cache(travel_cache)
-            save_processed_shows(processed_shows)
-            save_results_to_outputs(results, clashes, overnight_pairs)
-
-    # Final output save
-    print("[INFO] Final save of outputs...")
-    clashes, overnight_pairs = detect_clashes_and_overnight_combos(results)
-    save_travel_cache(travel_cache)
-    save_processed_shows(processed_shows)
-    save_results_to_outputs(results, clashes, overnight_pairs)
-
-    print(f"[INFO] Completed processing {len(results)} Golden Retriever shows.")
-
-# ---------------------------------------------
-# CONTINUED: ASYNC FETCH LINKS AND SCRAPE LOGIC
-# ---------------------------------------------
-async def fetch_aspx_links():
-    """Scrape show page links from the FosseData main listing."""
-    print("[INFO] Fetching show page links...")
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        page = await browser.new_page()
-        await page.goto("https://www.fossedata.co.uk/shows.aspx", wait_until="networkidle")
-
-        links = []
-        anchors = await page.query_selector_all("a")
-        for anchor in anchors:
-            href = await anchor.get_attribute("href")
-            if href and href.endswith(".aspx") and "Shows-To-Enter" not in href:
-                links.append(f"https://www.fossedata.co.uk/{href.lstrip('/')}")
-        await browser.close()
-    print(f"[INFO] Found {len(links)} links.")
-    return links
-
-# ---------------------------------------------
-# SCHEDULE DOWNLOAD LOGIC
-# ---------------------------------------------
-async def download_schedule_playwright(show_url, processed_shows):
-    if is_show_processed(show_url, processed_shows):
-        cached = processed_shows[show_url]
-        if "pdf" in cached and os.path.exists(cached["pdf"]):
-            print(f"[INFO] Skipping {show_url} — already processed.")
-            return cached["pdf"]
-        else:
-            print(f"[WARN] Cached file missing or invalid for {show_url}, re-downloading...")
-
-    filename = show_url.split("/")[-1].replace(".aspx", ".pdf")
-    local_path = os.path.join(CACHE_DIR, filename)
-    if os.path.exists(local_path):
-        print(f"[INFO] Skipping {show_url} — already downloaded.")
-        processed_shows[show_url] = {"pdf": local_path}
-        save_processed_shows(processed_shows)
-        return local_path
+async def download_schedule_for_show(context, show: dict) -> Optional[str]:
+    """
+    Download the schedule PDF for a given show via Playwright (with POST fallback).
+    Returns the local PDF file path, or None if failed.
+    """
+    show_id = show.get("id")
+    schedule_pdf_path = f"schedule_{show_id}.pdf" if show_id else "schedule_temp.pdf"
 
     try:
-        print(f"[INFO] Launching Playwright for: {show_url}")
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            page = await browser.new_page()
+        page = await context.new_page()
+        if show_id and show_id.isdigit():
+            await page.goto(f"https://www.fossedata.co.uk/show.asp?ShowID={show_id}", timeout=30000)
+        else:
+            await page.goto("https://www.fossedata.co.uk", timeout=20000)
 
-            await page.route("**/*", lambda route: route.abort()
-                             if any(ext in route.request.url for ext in [".css", ".woff", ".jpg", "analytics"])
-                             else route.continue_())
+        download_link_elem = await page.query_selector("a:text(\"Schedule\")")
+        download_link = await download_link_elem.get_attribute("href") if download_link_elem else None
 
-            if Path("storage_state.json").exists():
-                await load_storage_state(page.context)
-
+        if download_link:
+            download_task = page.wait_for_event("download")
+            await page.goto(download_link)
+            download = await download_task
+            await download.save_as(schedule_pdf_path)
+        else:
             try:
-                await asyncio.wait_for(page.goto(show_url, wait_until="networkidle"), timeout=30)
-            except asyncio.TimeoutError:
-                print(f"[TIMEOUT] Page load failed for {show_url}")
-                await browser.close()
-                return None
-
-            await page.evaluate("""() => {
-                const o = document.getElementById('cookiescript_injected_wrapper');
-                if (o) o.remove();
-            }""")
-
-            entry_close_postal = None
-            entry_close_online = None
-            try:
-                rows = await page.query_selector_all("table tr")
-                for row in rows:
-                    cells = await row.query_selector_all("td")
-                    if len(cells) < 2:
-                        continue
-                    key = (await cells[0].inner_text()).strip().lower()
-                    val = (await cells[1].inner_text()).strip()
-                    if "postal entries close" in key and "closed" not in val.lower():
-                        entry_close_postal = val
-                    elif "online entries close" in key and "closed" not in val.lower():
-                        entry_close_online = val
+                download_task = page.wait_for_event("download")
+                download_button = await page.query_selector("text=Download Schedule")
+                if download_button:
+                    await download_button.click()
+                else:
+                    fallback_link = await page.query_selector("a[href*='Schedule']")
+                    if fallback_link:
+                        await fallback_link.click()
+                download = await download_task
+                await download.save_as(schedule_pdf_path)
             except Exception as e:
-                print(f"[WARN] Failed to parse entry close table: {e}")
+                raise e
 
-            # Try PDF download
-            try:
-                await page.wait_for_selector("#ctl00_ContentPlaceHolder_btnDownloadSchedule", timeout=5000)
-                async with page.expect_download(timeout=10000) as dl:
-                    await page.click("#ctl00_ContentPlaceHolder_btnDownloadSchedule")
-                download = await dl.value
-                await download.save_as(local_path)
-                await save_storage_state(page)
-                await browser.close()
-                print(f"[INFO] Downloaded: {local_path}")
-            except Exception as e:
-                print(f"[WARN] Button download failed: {e}")
-                print("[INFO] Attempting fallback POST...")
-                try:
-                    form_data = await page.evaluate("""() => {
-                        const data = {};
-                        for (const [k, v] of new FormData(document.querySelector('#aspnetForm'))) {
-                            data[k] = v;
-                        }
-                        return data;
-                    }""")
+        await page.close()
+        return schedule_pdf_path
 
-                    resp = await page.context.request.post(show_url, data=form_data)
-                    if resp.ok and "application/pdf" in resp.headers.get("content-type", ""):
-                        content = await resp.body()
-                        with open(local_path, "wb") as f:
-                            f.write(content)
-                        await save_storage_state(page)
-                        await browser.close()
-                        print(f"[INFO] Fallback PDF saved: {local_path}")
-                    else:
-                        print(f"[ERROR] Fallback POST failed: {resp.status}")
-                        await browser.close()
-                        return None
-                except Exception as e:
-                    print(f"[ERROR] Fallback crash: {e}")
-                    await browser.close()
-                    return None
+    except Exception:
+        # POST fallback if Playwright failed
+        try:
+            if show_id and show_id.isdigit():
+                pdf_response = requests.post(
+                    "https://www.fossedata.co.uk/downloadSchedule.asp",
+                    data={"ShowID": show_id},
+                    timeout=15
+                )
+                if pdf_response.status_code == 200:
+                    with open(schedule_pdf_path, "wb") as f:
+                        f.write(pdf_response.content)
+                    print(f"Used fallback POST to download schedule for {show.get('show_name')}")
+                    return schedule_pdf_path
+        except Exception as e2:
+            print(f"Error downloading schedule for {show.get('show_name')}: {e2}")
 
-            processed_shows[show_url] = {"pdf": local_path}
-            save_processed_shows(processed_shows)
-            return local_path
-    except Exception as e:
-        print(f"[ERROR] Uncaught error for {show_url}: {e}")
-        return None
+    return None
+    
+def parse_pdf_for_info(pdf_path: str) -> Optional[dict]:
+    """
+    Extract relevant information from the schedule PDF.
+    Includes entry fees, catalogue prices, judges, and whether eligible classes are present.
+    """
+    text = ""
+    try:
+        import fitz  # PyMuPDF
+        doc = fitz.open(pdf_path)
+        for page in doc:
+            text += page.get_text()
+        doc.close()
+    except Exception:
+        try:
+            with pdfplumber.open(pdf_path) as pdf:
+                for page in pdf.pages:
+                    page_text = page.extract_text()
+                    if page_text:
+                        text += page_text + "\n"
+        except Exception as e:
+            print(f"Failed to read PDF {pdf_path}: {e}")
+            return None
 
-# ----------------- CONTINUED NEXT CHUNK -----------------
+    text_lower = text.lower()
+    if "golden" not in text_lower:
+        return None  # Skip if Golden Retrievers not mentioned
 
-# ---------------------------------------------
-# PRICING EXTRACTION AND COST CALCULATION LOGIC
-# ---------------------------------------------
+    info = {
+        "first_entry_fee": extract_fee(r"First\s+Entry[^£]*£\s*([0-9]+(?:\.[0-9]{1,2})?)", text),
+        "subsequent_entry_fee": extract_fee(r"Subsequent[^£]*£\s*([0-9]+(?:\.[0-9]{1,2})?)", text),
+        "catalogue_price": extract_fee(r"Catalogue[^£]*£\s*([0-9]+(?:\.[0-9]{1,2})?)", text),
+    }
 
-def extract_entry_pricing(text):
-    """Extract entry fees and catalogue costs from schedule text (non-member rates assumed)."""
-    lines = text.lower().splitlines()
-    entry_first, entry_additional, catalogue = None, None, None
+    judge_dogs, judge_bitches = extract_judges(text)
+    info["judge_dogs"] = judge_dogs
+    info["judge_bitches"] = judge_bitches
 
-    for line in lines:
-        if "first entry" in line and re.search(r"£\s*\d+(\.\d{2})?", line):
-            m = re.search(r"£\s*(\d+(\.\d{2})?)", line)
-            if m:
-                entry_first = float(m.group(1))
-        elif ("each subsequent" in line or "subsequent entries" in line or "additional entry" in line) and re.search(r"£\s*\d+(\.\d{2})?", line):
-            m = re.search(r"£\s*(\d+(\.\d{2})?)", line)
-            if m:
-                entry_additional = float(m.group(1))
-        elif "catalogue" in line and re.search(r"£\s*\d+(\.\d{2})?", line):
-            m = re.search(r"£\s*(\d+(\.\d{2})?)", line)
-            if m:
-                catalogue = float(m.group(1))
+    eligible_classes = [
+        "Puppy", "Junior", "Yearling", "Special Beginners",
+        "Undergraduate", "Tyro", "Novice", "Minor Puppy"
+    ]
+    info["eligible_classes_found"] = any(cls.lower() in text_lower for cls in eligible_classes)
 
-    if not entry_first:
-        print("[WARN] First entry fee not found — assuming £5.0")
-        entry_first = 5.0
-    if not entry_additional:
-        entry_additional = entry_first
-    if not catalogue:
-        catalogue = 3.0
+    return info
 
-    return {"entry_first": entry_first, "entry_additional": entry_additional, "catalogue": catalogue}
+def extract_fee(pattern: str, text: str) -> Optional[float]:
+    """Extract a fee amount using the given regex pattern."""
+    match = re.search(pattern, text, flags=re.IGNORECASE)
+    if match:
+        try:
+            return float(match.group(1))
+        except ValueError:
+            return None
+    return None
 
-# ---------------------------------------------
-# ELIGIBLE CLASSES DETECTION
-# ---------------------------------------------
-
-def detect_eligible_classes(text, show_type, show_date):
-    golden_section = extract_golden_retriever_section(text).lower()
-    eligible_codes = ["sbb", "ugb", "tb", "yb"]
-
-    if show_date < datetime.date(2025, 5, 15):
-        eligible_codes.append("pb")
-    if datetime.date(2025, 5, 15) <= show_date < datetime.date(2026, 5, 15):
-        eligible_codes.append("jb")
-
-    mixed_sex_names = ["puppy", "junior", "yearling"]
-    match_count = 0
-
-    if show_type.lower() == "championship":
-        for line in golden_section.splitlines():
-            if any(re.search(rf'\b{code}\b', line) for code in eligible_codes):
-                match_count += 1
+def extract_judges(text: str) -> Tuple[Optional[str], Optional[str]]:
+    """Extract judges for Dogs and Bitches from schedule text."""
+    judge_dogs = judge_bitches = None
+    judge_section_match = re.search(r"Golden Retriever[^\n]*Dogs?:\s*([^\n]+)", text)
+    if judge_section_match:
+        line = judge_section_match.group(0)
+        if 'Bitches' in line:
+            parts = re.split(r"Dogs?:|Bitches:", line)
+            judge_dogs = parts[1].strip(' ,;\n') if len(parts) >= 2 else None
+            judge_bitches = parts[2].strip(' ,;\n') if len(parts) >= 3 else None
+        else:
+            judge_dogs = judge_section_match.group(1).strip(' ,;\n')
     else:
-        found_mixed = False
-        for line in golden_section.splitlines():
-            if any(name in line for name in mixed_sex_names):
-                match_count += 1
-                found_mixed = True
-        if not found_mixed:
-            for line in golden_section.splitlines():
-                if any(re.search(rf'\b{code}\b', line) for code in eligible_codes):
-                    match_count += 1
+        judge_lines = re.findall(r"Judge[^:\n]*:\s*([^\n]+)", text)
+        if judge_lines:
+            if len(judge_lines) == 1:
+                judge_dogs = judge_bitches = judge_lines[0].strip(' ,;\n')
+            elif len(judge_lines) >= 2:
+                judge_dogs = judge_lines[0].strip(' ,;\n')
+                judge_bitches = judge_lines[1].strip(' ,;\n')
 
-    return match_count
+    return judge_dogs, judge_bitches
+    
+def save_results(results, clashes, overnights, travel_cache, processed_shows):
+    """Save results and caches to local files."""
+    # Sort results by date
+    for r in results:
+        if r.get('date'):
+            try:
+                r['_date_obj'] = datetime.datetime.strptime(r['date'], "%Y-%m-%d").date()
+            except Exception:
+                r['_date_obj'] = None
+        else:
+            r['_date_obj'] = None
+    results.sort(key=lambda x: (x.get('_date_obj') or datetime.date.max))
 
-# ---------------------------------------------
-# ENTRY COST CALCULATION
-# ---------------------------------------------
+    # Write JSON and CSV
+    with open(RESULTS_JSON, "w") as jf:
+        json.dump(results, jf, indent=2, default=str)
+    with open(RESULTS_CSV, "w", newline='') as cf:
+        writer = csv.writer(cf)
+        if results:
+            header = [k for k in results[0].keys() if k != '_date_obj']
+            writer.writerow(header)
+            for r in results:
+                row = [r.get(col, "") for col in header]
+                writer.writerow(row)
 
-def calculate_entry_cost(text, show_type, show_date):
-    fees = extract_entry_pricing(text)
-    eligible_class_count = detect_eligible_classes(text, show_type, show_date)
+    # Write clash/overnight CSV
+    with open(CLASH_OVERNIGHT_CSV, "w", newline='') as cf:
+        writer = csv.writer(cf)
+        writer.writerow(["type", "date", "show1", "show2", "travel_time_minutes"])
+        for item in clashes + overnights:
+            writer.writerow([
+                item.get('type', ''),
+                item.get('date', item.get('dates', '')),
+                item.get('show1', item.get('shows', [])[0] if isinstance(item.get('shows', []), list) else item.get('show1', '')),
+                item.get('show2', item.get('shows', [])[1] if isinstance(item.get('shows', []), list) and len(item.get('shows', [])) > 1 else item.get('show2', '')),
+                item.get('drive_time_minutes', item.get('between_travel_times', ''))
+            ])
 
-    if eligible_class_count == 0:
-        return {"entry_cost": 0, "catalogue_cost": fees["catalogue"], "total_cost": fees["catalogue"], "breakdown": {}}
+    # Save processed shows cache
+    try:
+        with open(PROCESSED_SHOWS_FILE, "w") as pf:
+            json.dump(sorted(list(processed_shows)), pf, indent=2)
+    except Exception as e:
+        print(f"Warning: Could not save {PROCESSED_SHOWS_FILE}: {e}")
 
-    first = fees["entry_first"]
-    subsequent = fees["entry_additional"]
-    entry_cost = first + subsequent * (eligible_class_count - 1)
-    total_cost = entry_cost + fees["catalogue"]
+    # Save travel cache
+    try:
+        with open(TRAVEL_CACHE_FILE, "w") as tf:
+            json.dump(travel_cache, tf, indent=2)
+    except Exception as e:
+        print(f"Warning: Could not save {TRAVEL_CACHE_FILE}: {e}")
 
-    breakdown = {
-        "matched_classes": eligible_class_count,
-        "first_entry": first,
-        "additional_entries": subsequent,
-        "catalogue": fees["catalogue"]
-    }
 
-    return {"entry_cost": entry_cost, "catalogue_cost": fees["catalogue"], "total_cost": total_cost, "breakdown": breakdown}
+def upload_to_google_drive():
+    """Upload output and cache files to Google Drive using service account."""
+    try:
+        creds_info = json.loads(base64.b64decode(os.environ.get("GOOGLE_SERVICE_ACCOUNT_BASE64", "")))
+        creds = service_account.Credentials.from_service_account_info(
+            creds_info,
+            scopes=["https://www.googleapis.com/auth/drive.file"]
+        )
+        drive_service = build('drive', 'v3', credentials=creds)
 
-# ---------------------------------------------
-# DIESEL COST CALCULATION
-# ---------------------------------------------
+        def upload_file(file_path, mime_type):
+            name = os.path.basename(file_path)
+            media = MediaFileUpload(file_path, mimetype=mime_type, resumable=False)
+            result = drive_service.files().list(q=f"name='{name}'", fields="files(id,name)").execute()
+            if result.get('files'):
+                file_id = result['files'][0]['id']
+                drive_service.files().update(fileId=file_id, media_body=media).execute()
+            else:
+                file_metadata = {'name': name}
+                drive_service.files().create(body=file_metadata, media_body=media).execute()
 
-def estimate_diesel_cost(dist_km):
-    round_trip_miles = dist_km * 2 * 0.621371
-    price = get_diesel_price()
-    gal = round_trip_miles / MPG
-    fuel = gal * 4.54609 * price
-    return round(fuel, 2)
-# ---------------------------------------------
-# FULL COST BREAKDOWN (ENTRY FEES + DIESEL)
-# ---------------------------------------------
+        upload_file(RESULTS_JSON, "application/json")
+        upload_file(RESULTS_CSV, "text/csv")
+        upload_file(CLASH_OVERNIGHT_CSV, "text/csv")
+        upload_file(TRAVEL_CACHE_FILE, "application/json")
+        upload_file(PROCESSED_SHOWS_FILE, "application/json")
+        upload_file(STORAGE_STATE_FILE, "application/json")
 
-def full_cost_breakdown(dist_km, dur_s, text, show_type, show_date):
-    diesel_cost = estimate_diesel_cost(dist_km)
-    entry_costs = calculate_entry_cost(text, show_type, show_date)
+    except Exception as e:
+        print(f"Warning: Google Drive upload failed: {e}")
+        
+def get_eligible_classes(
+    text: str,
+    show_type: str,
+    show_date: datetime.date,
+    wins_log: List[dict],
+    postal_close_date: datetime.date,
+    class_exclusions: List[str],
+    manual_exclusions: List[str],
+    always_include: List[str]
+) -> Tuple[List[str], List[str]]:
+    """
+    Returns two lists:
+      - all_eligible: all classes Delia could enter under KC rules
+      - to_enter:      same list minus any in class_exclusions+manual_exclusions
+    """
+    t = text.lower()
+    age_mo = (show_date.year - DOG_DOB.year) * 12 + (show_date.month - DOG_DOB.month)
 
-    total = diesel_cost + entry_costs["total_cost"]
+    # ===== Fixed win logic with correct exclusions =====
+    valid_wins = filter_wins_for_eligibility(wins_log, postal_close_date)
+    first_prizes = sum(
+        1 for w in valid_wins
+        if w["award"].lower() == "1st"
+        and not any(
+            ex in w["class"].lower()
+            for ex in [
+                "minor puppy", "special minor puppy", "puppy", "special puppy",
+                "baby puppy", "junior", "special junior", "yearling", "special yearling",
+                "variety", "av", "a.v."
+            ]
+        )
+    )
+    cc_count  = sum(1 for w in valid_wins if w["award"] in CC_TRIGGER_WORDS)
+    rcc_count = sum(1 for w in valid_wins if w["award"] in RCC_TRIGGER_WORDS)
+    got_cc    = (cc_count >= 3) or (cc_count >= 2 and rcc_count >= 5)
 
-    return {
-        "diesel_cost": diesel_cost,
-        "entry_cost": round(entry_costs["entry_cost"], 2),
-        "catalogue_cost": round(entry_costs["catalogue_cost"], 2),
-        "total_cost": round(total, 2),
-        "entry_breakdown": entry_costs["breakdown"]
-    }
+    codes = set()
 
-# ---------------------------------------------
-# JUNIOR WARRANT (JW) POINT CALCULATION
-# ---------------------------------------------
+    # ===== Age‐based eligibility =====
+    if 4 <= age_mo < 6    and "baby puppy"    in t: codes.add("baby puppy")
+    if 6 <= age_mo < 9    and "minor puppy"   in t: codes.add("minor puppy")
+    if 6 <= age_mo < 12   and "puppy"         in t: codes.add("puppy")
+    if 6 <= age_mo < 18   and "junior"        in t: codes.add("junior")
+    if 12 <= age_mo < 24  and "yearling"      in t: codes.add("yearling")
 
-def calculate_jw_points(text, show_type, show_date):
-    golden_section = extract_golden_retriever_section(text)
-    eligible_codes = ["sbb", "ugb", "tb", "yb"]
-    if show_date < datetime.date(2025, 5, 15):
-        eligible_codes.append("pb")
-    if datetime.date(2025, 5, 15) <= show_date < datetime.date(2026, 5, 15):
-        eligible_codes.append("jb")
+    # ===== Win‐based eligibility =====
+    if not got_cc and first_prizes == 0 and "maiden"        in t: codes.add("maiden")
+    if not got_cc and first_prizes < 3  and "novice"        in t: codes.add("novice")
+    if not got_cc and first_prizes < 3  and "undergraduate" in t: codes.add("undergraduate")
+    if not got_cc and first_prizes < 4  and "graduate"      in t: codes.add("graduate")
+    if not got_cc and first_prizes < 5  and "post graduate" in t: codes.add("post graduate")
+    if not got_cc and first_prizes < 3  and "mid limit"     in t: codes.add("mid limit")
+    if not got_cc and first_prizes < 7  and "limit"         in t: codes.add("limit")
 
-    points = 0
-    class_lines = golden_section.lower().splitlines()
-    match_count = sum(1 for line in class_lines if any(re.search(rf'\b{code}\b', line) for code in eligible_codes))
+    # ===== Always‐open classes =====
+    if "open" in t: codes.add("open")
 
-    if show_type.lower() == "championship":
-        points = match_count * 3
-    elif "open" in show_type.lower() or "premier open" in show_type.lower() or "limit" in show_type.lower():
-        points = 1 if match_count > 0 else 0
-    return points
+    # ===== Veteran classes =====
+    if age_mo >= 84  and "veteran"         in t: codes.add("veteran")
+    if age_mo >= 120 and "special veteran" in t: codes.add("special veteran")
 
-# ---------------------------------------------
-# OVERNIGHT STAY DETECTION AND CLASH DETECTION
-# ---------------------------------------------
+    # ===== Special classes =====
+    if not HANDLER_HAS_CC and "special beginners" in t: codes.add("special beginners")
+    if DOG_HAS_SGWC        and "special working"   in t: codes.add("special working")
+    if DOG_HAS_GCDS        and "kc good citizen"  in t: codes.add("kc good citizen")
 
-def detect_clashes(results):
+    # ===== Always‐include overrides =====
+    for c in always_include:
+        if c.lower() in t:
+            codes.add(c.lower())
+
+    # ===== Prepare outputs =====
+    all_eligible = sorted(codes)
+    exclusions = {c.lower() for c in class_exclusions + manual_exclusions}
+    to_enter    = sorted(c for c in codes if c not in exclusions)
+
+    return all_eligible, to_enter
+    
+def calculate_jw_points(
+    show_type: str,
+    show_date: datetime.date,
+    eligible_classes_count: int,
+    jw_cutoff: datetime.date
+) -> int:
+    """
+    Calculate potential Junior Warrant points.
+
+    Rules:
+    - Only applies if show_date is before or on the JW cutoff.
+    - Championship = 3 points per eligible class.
+    - Open / Premier Open  = 1 point per eligible class.
+    - Other types = 0.
+    """
+    if show_date > jw_cutoff:
+        return 0
+    if eligible_classes_count <= 0:
+        return 0
+
+    if show_type == "Championship":
+        return 3 * eligible_classes_count
+    if show_type in ["Open", "Premier Open"]:
+        return eligible_classes_count
+
+    return 0
+    
+def extract_postcode(text: str) -> Optional[str]:
+    """
+    Extracts a UK postcode from a given string.
+    Matches standard UK postcode formats like YO8 9NA.
+    """
+    match = re.search(r"\b[A-Z]{1,2}\d{1,2}[A-Z]?\s*\d[A-Z]{2}\b", text, flags=re.IGNORECASE)
+    return match.group(0).upper() if match else None
+    
+def detect_clashes(results: List[dict]) -> List[dict]:
+    """
+    Detect same-day show clashes (ignoring if same postcode).
+    """
     clashes = []
-    for i, show1 in enumerate(results):
-        for j, show2 in enumerate(results):
-            if i >= j:
-                continue
-            if show1["date"] == show2["date"] and show1["postcode"] != show2["postcode"]:
-                clashes.append((show1["show"], show2["show"]))
+    shows_by_date = defaultdict(list)
+
+    for r in results:
+        show_date = r.get("show_date") or r.get("date")
+        if show_date:
+            shows_by_date[show_date].append(r)
+
+    for date, show_list in shows_by_date.items():
+        if len(show_list) > 1:
+            for i in range(len(show_list)):
+                for j in range(i + 1, len(show_list)):
+                    s1 = show_list[i]
+                    s2 = show_list[j]
+                    pc1 = extract_postcode(s1.get("venue", ""))
+                    pc2 = extract_postcode(s2.get("venue", ""))
+                    if pc1 and pc2 and pc1.upper() == pc2.upper():
+                        continue  # Same postcode = allowed
+                    clashes.append({
+                        "type": "Clash",
+                        "date": date,
+                        "show1": s1["show_name"],
+                        "show2": s2["show_name"]
+                    })
     return clashes
+    
+def detect_overnight_pairs(
+    results: List[dict],
+    travel_cache: dict
+) -> List[dict]:
+    """
+    Detect overnight stay chains:
+    - Shows on consecutive days
+    - Both >3h from home
+    - Consecutive pairs within MAX_PAIR_GAP_MINUTES of each other
+    - Allows multi-day chaining
+    """
+    overnights = []
+    max_pair_gap_minutes = int(os.getenv("MAX_PAIR_GAP_MINUTES", "75"))
+    max_shows = os.getenv("MAX_SHOWS")
+    max_shows = int(max_shows) if max_shows and max_shows.isdigit() else None  # Unlimited if unset
 
-def detect_overnight_pairs(results):
-    combos = []
-    for i, show1 in enumerate(results):
-        for j, show2 in enumerate(results):
-            if i >= j:
-                continue
-            if not show1["date"] or not show2["date"]:
-                continue
-            days_apart = abs((date_parse(show1["date"]).date() - date_parse(show2["date"]).date()).days)
-            if days_apart in [0, 1]:
-                duration1 = show1.get("duration_hr", 0)
-                duration2 = show2.get("duration_hr", 0)
-                if duration1 >= OVERNIGHT_THRESHOLD_HOURS or duration2 >= OVERNIGHT_THRESHOLD_HOURS:
-                    combos.append((show1["show"], show2["show"]))
-    return combos
+    results_by_date = sorted(
+        [r for r in results if r.get("show_date") or r.get("date")],
+        key=lambda x: date_parse(x.get("show_date") or x.get("date")).date()
+    )
 
-# ---------------------------------------------
-# PLAYWRIGHT PDF DOWNLOAD + FALLBACK LOGIC
-# ---------------------------------------------
-async def download_schedule_playwright(show_url, processed_shows):
-    if is_show_processed(show_url, processed_shows):
-        cached = processed_shows[show_url]
-        if isinstance(cached, dict) and "pdf" in cached and os.path.exists(cached["pdf"]):
-            print(f"[INFO] Skipping {show_url} — already processed.")
-            return cached["pdf"]
-        else:
-            print(f"[WARN] Cached file missing or invalid for {show_url}, re-downloading...")
+    for i, show_a in enumerate(results_by_date):
+        chain = [show_a]
+        travel_times = []
+        date_a = date_parse(show_a.get("show_date") or show_a.get("date")).date()
+        time_from_home = show_a.get("drive_time_minutes", 0)
+        if time_from_home < 180:
+            continue  # Only care about shows over 3h away
 
-    filename = show_url.split("/")[-1].replace(".aspx", ".pdf")
-    local_path = os.path.join(CACHE_DIR, filename)
-    if os.path.exists(local_path):
-        print(f"[INFO] Skipping {show_url} — already downloaded.")
-        processed_shows[show_url] = {"pdf": local_path}
-        save_processed_shows(processed_shows)
-        return local_path
+        current_date = date_a
+        current_show = show_a
+
+        while True:
+            next_day = current_date + datetime.timedelta(days=1)
+            next_day_shows = [
+                r for r in results_by_date
+                if date_parse(r.get("show_date") or r.get("date")).date() == next_day
+            ]
+            found_next = False
+            for show_b in next_day_shows:
+                venue_a = current_show['venue']
+                venue_b = show_b['venue']
+                if not venue_a or not venue_b:
+                    continue
+
+                travel_ab = get_between_travel_info(venue_a, venue_b, travel_cache)
+                time_ab = travel_ab.get('drive_time_minutes', 9999)
+                if time_ab <= max_pair_gap_minutes:
+                    chain.append(show_b)
+                    travel_times.append(time_ab)
+                    current_date = next_day
+                    current_show = show_b
+                    found_next = True
+                    break  # Only chain to one next show per day
+
+            if not found_next:
+                break  # No link in the chain
+
+            if max_shows and len(chain) >= max_shows:
+                break  # Hit max chain length if defined
+
+        if len(chain) > 1:  # Only flag chains with at least two shows
+            overnights.append({
+                "type": "Overnight Suggestion",
+                "dates": [s.get("show_date") or s.get("date") for s in chain],
+                "shows": [s['show_name'] for s in chain],
+                "chain_length": len(chain),
+                "between_travel_times": travel_times
+            })
+
+    return overnights
+    
+ 
+WINS_LOG_FILE = "wins_log.json"
+
+def load_wins_log() -> list:
+    """
+    Load the wins log JSON file.
+    Returns an empty list if file not found or unreadable.
+    """
+    if not os.path.isfile(WINS_LOG_FILE):
+        print(f"No wins log found at {WINS_LOG_FILE}.")
+        return []
 
     try:
-        print(f"[INFO] Launching Playwright for: {show_url}")
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            page = await browser.new_page()
+        with open(WINS_LOG_FILE, "r") as f:
+            wins = json.load(f)
+            if isinstance(wins, list):
+                return wins
+            else:
+                print(f"Warning: {WINS_LOG_FILE} is not a list.")
+                return []
+    except Exception as e:
+        print(f"Error loading {WINS_LOG_FILE}: {e}")
+        return []
+        
+async def fetch_postal_close_date(show_id: str) -> Optional[datetime.date]:
+    """
+    Scrape the postal close date for a show from its main aspx page.
+    Returns a date object if found, else None.
+    """
+    try:
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch()
+            context = await browser.new_context(storage_state=STORAGE_STATE_FILE if os.path.exists(STORAGE_STATE_FILE) else None)
+            page = await context.new_page()
+            await page.goto(f"https://www.fossedata.co.uk/show.asp?ShowID={show_id}", timeout=30000)
+            html = await page.content()
+            await context.storage_state(path=STORAGE_STATE_FILE)
+            await browser.close()
 
-            await page.route("**/*", lambda route: route.abort() if any(ext in route.request.url for ext in [".css", ".woff", ".jpg", "analytics"]) else route.continue_())
-
-            if Path("storage_state.json").exists():
-                await load_storage_state(page.context)
-
-            try:
-                await asyncio.wait_for(page.goto(show_url, wait_until="networkidle"), timeout=30)
-            except asyncio.TimeoutError:
-                print(f"[TIMEOUT] Page load failed for {show_url}")
-                await browser.close()
-                return None
-
-            await page.evaluate("""() => {
-                const o = document.getElementById('cookiescript_injected_wrapper');
-                if (o) o.remove();
-            }""")
-
-            entry_close_postal = None
-            entry_close_online = None
-            try:
-                rows = await page.query_selector_all("table tr")
-                for row in rows:
-                    cells = await row.query_selector_all("td")
-                    if len(cells) < 2:
-                        continue
-                    key = (await cells[0].inner_text()).strip().lower()
-                    val = (await cells[1].inner_text()).strip()
-                    if "postal entries close" in key and "closed" not in val.lower():
-                        entry_close_postal = val
-                    elif "online entries close" in key and "closed" not in val.lower():
-                        entry_close_online = val
-            except Exception as e:
-                print(f"[WARN] Failed to parse entry close table: {e}")
-
-            try:
-                await page.wait_for_selector("#ctl00_ContentPlaceHolder_btnDownloadSchedule", timeout=5000)
-                async with page.expect_download(timeout=10000) as dl:
-                    await page.click("#ctl00_ContentPlaceHolder_btnDownloadSchedule")
-                download = await dl.value
-                await download.save_as(local_path)
-                await save_storage_state(page)
-                await browser.close()
-                print(f"[INFO] Downloaded: {local_path}")
-            except Exception as e:
-                print(f"[WARN] Button download failed: {e}")
-                print("[INFO] Attempting fallback POST...")
-                try:
-                    form_data = await page.evaluate("""() => {
-                        const data = {};
-                        for (const [k, v] of new FormData(document.querySelector('#aspnetForm'))) {
-                            data[k] = v;
-                        }
-                        return data;
-                    }""")
-
-                    resp = await page.context.request.post(show_url, data=form_data)
-                    if resp.ok and "application/pdf" in resp.headers.get("content-type", ""):
-                        content = await resp.body()
-                        with open(local_path, "wb") as f:
-                            f.write(content)
-                        await save_storage_state(page)
-                        await browser.close()
-                        print(f"[INFO] Fallback PDF saved: {local_path}")
-                    else:
-                        print(f"[ERROR] Fallback POST failed: {resp.status}")
-                        await browser.close()
-                        return None
-                except Exception as e:
-                    print(f"[ERROR] Fallback crash: {e}")
-                    await browser.close()
-                    return None
-
-            try:
-                text = extract_text_from_pdf(local_path)
-                pc = get_postcode(text)
-                drive = get_drive(HOME_POSTCODE, pc, travel_cache) if pc else None
-                cost = estimate_cost(drive["distance"], drive["duration"]) if drive else None
-                judge = extract_judges(text, is_single_breed="single breed" in text.lower())
-                dt = get_show_date(text) or get_show_date_from_title(show_url)
-                show_type = get_show_type(text, file_path=local_path)
-                points = calculate_jw_points(text, show_type, dt) if dt else 0
-                entry_fees = extract_entry_pricing(text, show_type)
-                eligible_classes = get_eligible_classes(text, show_type, dt)
-                entry_cost_data = calculate_entry_cost(text, show_type, dt)
-                total_cost_data = full_cost_breakdown(drive["distance"], drive["duration"], len(eligible_classes), entry_fees) if drive else None
-
-                show_data = {
-                    "show": show_url,
-                    "pdf": local_path,
-                    "date": dt.isoformat() if dt else None,
-                    "postcode": pc,
-                    "duration_hr": round(drive["duration"] / 3600, 2) if drive else None,
-                    "distance_km": round(drive["distance"], 1) if drive else None,
-                    "cost_estimate": round(cost, 2) if cost else None,
-                    "points": points,
-                    "judge": judge,
-                    "entry_close_postal": entry_close_postal,
-                    "entry_close_online": entry_close_online,
-                    "show_type": show_type,
-                    "diesel_cost": total_cost_data["diesel_cost"] if total_cost_data else None,
-                    "entry_cost": total_cost_data["entry_cost"] if total_cost_data else None,
-                    "catalogue_cost": total_cost_data["catalogue_cost"] if total_cost_data else None,
-                    "total_cost": total_cost_data["total_cost"] if total_cost_data else None
-                }
-
-                processed_shows[show_url] = show_data
-                save_processed_shows(processed_shows)
-                return local_path
-            except Exception as e:
-                print(f"[ERROR] Final crash after download: {e}")
-                processed_shows[show_url] = {"error": str(e)}
-                save_processed_shows(processed_shows)
-                return None
+        return parse_postal_close_date_from_html(html)
 
     except Exception as e:
-        print(f"[ERROR] Uncaught error for {show_url}: {e}")
-        return None
-
-# ---------------------------------------------
-# MAIN ASYNC FULL RUN LOGIC WITH BATCH SAVING
-# ---------------------------------------------
-async def full_run():
-    global travel_cache
-    travel_cache = load_travel_cache()
-    download_from_drive("processed_shows.json")
-    download_from_drive("travel_cache.json")
-
-    processed_shows = load_processed_shows()
-    urls = fetch_aspx_links()
+        print(f"Warning: Failed to fetch postal close date for show {show_id}: {e}")
+    return None
+    
+def parse_postal_close_date_from_html(html: str) -> Optional[datetime.date]:
+    """Extract postal close date from show page HTML."""
+    soup = BeautifulSoup(html, "html.parser")
+    rows = soup.select("table tbody tr")
+    for row in rows:
+        cells = row.find_all("td")
+        if len(cells) == 2 and "postal entries close" in cells[0].get_text(strip=True).lower():
+            date_text = cells[1].get_text(strip=True)
+            date_match = re.search(r"(\d{1,2} \w+ 20\d{2})", date_text)
+            if date_match:
+                try:
+                    return datetime.datetime.strptime(date_match.group(1), "%d %B %Y").date()
+                except ValueError:
+                    pass
+    return None
+        
+def main_processing_loop(show_list: list):
+    """
+    Main loop to process shows, check eligibility, calculate costs, JW points, etc.
+    """
+    wins_log = load_wins_log()
     results = []
-    counter = 0
+    processed_shows = set()
 
-    for url in urls:
-        if is_show_processed(url, processed_shows):
-            print(f"[INFO] Skipping {url} — already processed.")
+    for show in show_list:
+        show_id = show.get("id")
+        if not show_id or show_id in processed_shows:
             continue
 
-        try:
-            pdf = await asyncio.wait_for(download_schedule_playwright(url, processed_shows), timeout=90)
-        except asyncio.TimeoutError:
-            print(f"[TIMEOUT] {url} took too long.")
-            processed_shows[url] = {"error": "timeout"}
-            save_processed_shows(processed_shows)
+        print(f"Processing show: {show.get('show_name')} on {show.get('date')}")
+        
+        postal_close_date = asyncio.run(fetch_postal_close_date(show_id))
+
+        # ===== Schedule Download =====
+        async def download_and_parse():
+            async with async_playwright() as pw:
+                browser = await pw.chromium.launch()
+                context = await browser.new_context(storage_state=STORAGE_STATE_FILE if os.path.exists(STORAGE_STATE_FILE) else None)
+                pdf_path = await download_schedule_for_show(context, show)
+                await context.storage_state(path=STORAGE_STATE_FILE)
+                await browser.close()
+                return pdf_path
+
+        pdf_path = asyncio.run(download_and_parse())
+        if not pdf_path:
+            print(f"Skipping {show.get('show_name')} (no schedule PDF)")
             continue
 
-        if not pdf:
+        info = parse_pdf_for_info(pdf_path)
+        if not info:
+            print(f"Skipping {show.get('show_name')} (Golden Retriever not mentioned)")
             continue
 
-        text = extract_text_from_pdf(pdf)
-        if "golden" not in text.lower():
-            print(f"[INFO] Skipping {pdf} — no 'golden' found.")
-            processed_shows[url] = {"pdf": pdf}
-            save_processed_shows(processed_shows)
-            continue
+        # ===== Eligibility =====
+        with open(pdf_path, "rb") as f:
+            pdf_text = extract_text_from_pdf(f)
 
-        pc = get_postcode(text)
-        drive = get_drive(HOME_POSTCODE, pc, travel_cache) if pc else None
-        cost = estimate_cost(drive["distance"], drive["duration"]) if drive else None
-        judge = extract_judges(text, is_single_breed="single breed" in text.lower())
-        dt = get_show_date(text) or get_show_date_from_title(url)
-        show_type = get_show_type(text, file_path=pdf)
-        points = calculate_jw_points(text, show_type, dt) if dt else 0
-        entry_fees = extract_entry_pricing(text, show_type)
-        eligible_classes = get_eligible_classes(text, show_type, dt)
-        entry_cost_data = calculate_entry_cost(text, show_type, dt)
-        total_cost_data = full_cost_breakdown(drive["distance"], drive["duration"], len(eligible_classes), entry_fees) if drive else None
+        eligible_all, eligible_to_enter = get_eligible_classes(
+            text=pdf_text,
+            show_type=show["type"],
+            show_date=show["date"],
+            wins_log=wins_log,
+            postal_close_date=postal_close_date,
+            class_exclusions=[],
+            manual_exclusions=[],
+            always_include=[]
+        )
 
+        # ===== JW Points =====
+        jw_points = calculate_jw_points(
+            show_type=show["type"],
+            show_date=show["date"],
+            eligible_classes_count=len(eligible_to_enter),
+            jw_cutoff=JW_CUTOFF
+        )
+
+        # ===== Travel and Cost Calculation =====
+        venue = show.get("venue", "")
+        travel_info = get_travel_info(venue, travel_cache)
+        diesel_cost = calculate_diesel_cost(travel_info.get("distance_miles", 0), diesel_price_per_litre, MPG)
+
+        first_fee = info.get("first_entry_fee") or 0
+        subsequent_fee = info.get("subsequent_entry_fee") or 0
+        catalogue_fee = info.get("catalogue_price") or 0
+
+        total_entry_fee = first_fee + (max(len(eligible_to_enter) - 1, 0) * subsequent_fee)
+        total_cost = total_entry_fee + catalogue_fee + diesel_cost
+
+        # ===== Build Result Row =====
         result = {
-            "show": url,
-            "pdf": pdf,
-            "date": dt.isoformat() if dt else None,
-            "postcode": pc,
-            "duration_hr": round(drive["duration"] / 3600, 2) if drive else None,
-            "distance_km": round(drive["distance"], 1) if drive else None,
-            "cost_estimate": round(cost, 2) if cost else None,
-            "points": points,
-            "judge": judge,
-            "show_type": show_type,
-            "entry_close_postal": processed_shows[url].get("entry_close_postal"),
-            "entry_close_online": processed_shows[url].get("entry_close_online"),
-            "diesel_cost": total_cost_data["diesel_cost"] if total_cost_data else None,
-            "entry_cost": total_cost_data["entry_cost"] if total_cost_data else None,
-            "catalogue_cost": total_cost_data["catalogue_cost"] if total_cost_data else None,
-            "total_cost": total_cost_data["total_cost"] if total_cost_data else None
+            "show_id": show_id,
+            "show_name": show.get("show_name"),
+            "show_date": show.get("date").isoformat() if isinstance(show.get("date"), datetime.date) else show.get("date"),
+            "venue": venue,
+            "type": show["type"],
+            "judge_dogs": info.get("judge_dogs"),
+            "judge_bitches": info.get("judge_bitches"),
+            "eligible_classes": ", ".join(eligible_to_enter),
+            "jw_points": jw_points,
+            "first_entry_fee": first_fee,
+            "subsequent_entry_fee": subsequent_fee,
+            "catalogue_fee": catalogue_fee,
+            "diesel_cost": diesel_cost,
+            "total_cost": total_cost,
+            "drive_distance_miles": travel_info.get("distance_miles"),
+            "drive_time_minutes": travel_info.get("drive_time_minutes")
         }
 
         results.append(result)
-        processed_shows[url] = result
-        counter += 1
+        processed_shows.add(show_id)
 
-        # Save and upload every 5 processed shows
-        if counter % 5 == 0:
-            save_travel_cache(travel_cache)
-            save_processed_shows(processed_shows)
-            clashes, overnight_pairs = detect_clashes_and_overnight_combos(results)
-            save_results_to_outputs(results, clashes, overnight_pairs)
+        # Periodic save
+        if len(results) % 5 == 0:
+            save_results(results, [], [], travel_cache, processed_shows)
 
-    # Final save after loop
-    save_travel_cache(travel_cache)
-    save_processed_shows(processed_shows)
-    clashes, overnight_pairs = detect_clashes_and_overnight_combos(results)
-    save_results_to_outputs(results, clashes, overnight_pairs)
+    # ===== Clashes and Overnights =====
+    clashes = detect_clashes(results)
+    overnights = detect_overnight_pairs(results, travel_cache)
+    save_results(results, clashes, overnights, travel_cache, processed_shows)
 
-    if results:
-        print(f"[INFO] Finished processing {len(results)} Golden Retriever shows.")
-    else:
-        print("[INFO] No valid Golden Retriever shows found.")
+    # ===== Upload to Drive =====
+    upload_to_google_drive()
 
-# ---------------------------------------------
-# END OF SCRIPT
-# ---------------------------------------------
+    print("Processing loop complete.")
+    return results
+    
+def filter_wins_for_eligibility(wins_log: list, postal_close_date: Optional[datetime.date]) -> list:
+    """
+    Filters the wins log to only include wins dated before the postal close date.
+    If no postal_close_date is given, all wins are considered valid.
+    """
+    if not postal_close_date:
+        return wins_log
+    return [
+        w for w in wins_log
+        if "show_date" in w and date_parse(w["show_date"]).date() <= postal_close_date
+    ]
+    
+    
+def extract_text_from_pdf(file_obj) -> str:
+    """
+    Extract text from a PDF file object.
+    Tries PyMuPDF first, falls back to pdfplumber.
+    """
+    text = ""
+    try:
+        import fitz  # PyMuPDF
+        doc = fitz.open(stream=file_obj.read(), filetype="pdf")
+        for page in doc:
+            text += page.get_text()
+        doc.close()
+    except Exception:
+        try:
+            file_obj.seek(0)
+            with pdfplumber.open(file_obj) as pdf:
+                for page in pdf.pages:
+                    page_text = page.extract_text()
+                    if page_text:
+                        text += page_text + "\n"
+        except Exception as e:
+            print(f"Failed to extract text from PDF: {e}")
+    return text
+
+def get_travel_info(destination: str, cache: dict) -> dict:
+    """
+    Get travel distance and duration from home to destination.
+    Uses cached results if available.
+    """
+    if not destination:
+        return {"distance_miles": 0, "drive_time_minutes": 0}
+
+    if destination in cache:
+        return cache[destination]
+
+    try:
+        api_key = os.getenv("GOOGLE_MAPS_API_KEY")
+        origin = os.getenv("HOME_POSTCODE")
+        params = {
+            "origin": origin,
+            "destination": destination,
+            "key": api_key,
+            "units": "imperial",
+        }
+        resp = requests.get("https://maps.googleapis.com/maps/api/directions/json", params=params, timeout=10)
+        data = resp.json()
+        if data["status"] == "OK":
+            leg = data["routes"][0]["legs"][0]
+            miles = leg["distance"]["text"].replace(" mi", "")
+            minutes = leg["duration"]["value"] // 60
+            result = {"distance_miles": float(miles), "drive_time_minutes": int(minutes)}
+            cache[destination] = result
+            return result
+        else:
+            print(f"Google Maps API error for {destination}: {data['status']}")
+    except Exception as e:
+        print(f"Error fetching travel info for {destination}: {e}")
+
+    return {"distance_miles": 0, "drive_time_minutes": 0}
+    
+def get_between_travel_info(origin: str, destination: str, cache: dict) -> dict:
+    """
+    Get travel time between two venues. Uses cache if available, fetches if missing.
+    """
+    if not origin or not destination:
+        return {"distance_miles": 0, "drive_time_minutes": 9999}
+
+    key = f"{origin}||{destination}"
+    if 'between' not in cache:
+        cache['between'] = {}
+
+    if key in cache['between']:
+        return cache['between'][key]
+
+    try:
+        api_key = os.getenv("GOOGLE_MAPS_API_KEY")
+        params = {
+            "origin": origin,
+            "destination": destination,
+            "key": api_key,
+            "units": "imperial",
+        }
+        resp = requests.get("https://maps.googleapis.com/maps/api/directions/json", params=params, timeout=10)
+        data = resp.json()
+        if data["status"] == "OK":
+            leg = data["routes"][0]["legs"][0]
+            miles = float(leg["distance"]["text"].replace(" mi", ""))
+            minutes = leg["duration"]["value"] // 60
+            result = {"distance_miles": miles, "drive_time_minutes": minutes}
+            cache['between'][key] = result
+            return result
+        else:
+            print(f"Google Maps API error between {origin} and {destination}: {data['status']}")
+    except Exception as e:
+        print(f"Error fetching between-venue travel info from {origin} to {destination}: {e}")
+
+    # Cache the failure so it doesn't retry repeatedly
+    cache['between'][key] = {"distance_miles": 0, "drive_time_minutes": 9999}
+    return cache['between'][key]
+
+def calculate_diesel_cost(distance_miles: float, price_per_litre: float, mpg: int) -> float:
+    """
+    Calculates round-trip diesel cost for given distance, diesel price, and mpg.
+    """
+    if mpg <= 0:
+        return 0
+    gallons_needed = (distance_miles * 2) / mpg  # Round trip
+    litres_needed = gallons_needed * LITERS_PER_GALLON
+    return round(litres_needed * price_per_litre, 2)
+    
