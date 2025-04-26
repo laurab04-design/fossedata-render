@@ -5,49 +5,51 @@ from pathlib import Path
 import asyncio
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
-from fossedata_core import full_run
 
-# Ensure Playwright uses its vendored browsers
+# — make sure Playwright uses its vendored browsers —
 os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "0"
 
-# Debug: Check if Chromium is already installed
-chromium_exec = Path("/opt/render/.cache/ms-playwright/chromium")
-if chromium_exec.exists():
-    print("Chromium is installed.")
-else:
-    print("Chromium not found, installing...")
+# check/install Chromium
+CHROMIUM = Path("/opt/render/.cache/ms-playwright/chromium")
+if not CHROMIUM.exists():
+    try:
+        subprocess.run(["playwright", "install", "chromium"], check=True)
+        print("Chromium installed.")
+    except Exception as e:
+        print(f"Chromium install error: {e}")
 
-# Force-install Chromium if not already present
-try:
-    subprocess.run(["playwright", "install", "chromium"], check=True)
-    print("Chromium installation attempted.")
-except Exception as e:
-    print(f"Chromium install error: {e}")
-
-# ─── Now define the FastAPI app ────────────────────────────────────────
+# — now define your FastAPI app —
 app = FastAPI()
+
+def _run_full_scrape():
+    """
+    Sync wrapper to call your async full_run() in its own fresh event loop.
+    That way asyncio.run() never runs inside FastAPI’s loop.
+    """
+    from fossedata_core import full_run
+    return asyncio.run(full_run())
 
 @app.get("/")
 async def root():
-    return {"status": "ok", "message": "FosseData Render service is running."}
-
-@app.post("/run")
-async def run_blocking():
-    """
-    Synchronous-style run: call full_run on a thread and wait for it to finish.
-    """
-    results = await asyncio.to_thread(full_run)
-    return {"processed": len(results)}
+    return {"status": "ok", "message": "FosseData service is running."}
 
 @app.get("/run")
-async def run_background(background_tasks: BackgroundTasks):
+async def trigger_run(background_tasks: BackgroundTasks):
     """
-    Asynchronous kick-off: fire full_run in the background immediately.
+    Kicks off the scrape in the background immediately.
+    Returns 200 while the work runs in a separate thread.
+    """
+    background_tasks.add_task(_run_full_scrape)
+    return {"status": "started", "message": "Background scrape started."}
+
+@app.post("/run")
+async def run_endpoint():
+    """
+    Blocks until full_run() finishes, then returns how many shows processed.
+    We offload to a thread so that asyncio.run() happens outside the main loop.
     """
     try:
-        loop = asyncio.get_running_loop()
-        # schedule full_run() but return immediately
-        background_tasks.add_task(loop.create_task, full_run())
-        return {"status": "started", "message": "Background scrape started."}
+        results = await asyncio.to_thread(_run_full_scrape)
+        return {"processed": len(results)}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Run failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
