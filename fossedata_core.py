@@ -29,6 +29,20 @@ DOG_NAME = os.getenv("DOG_NAME")
 DOG_DOB = date_parse(os.getenv("DOG_DOB")).date()
 MPG = int(os.getenv("MPG"))
 MAX_PAIR_GAP_MINUTES = int(os.getenv("MAX_PAIR_GAP_MINUTES"))
+creds_b64 = os.environ.get("GOOGLE_SERVICE_ACCOUNT_BASE64")
+if not creds_b64:
+    print("[ERROR] GOOGLE_SERVICE_ACCOUNT_BASE64 not set!")
+else:
+    with open("credentials.json", "wb") as f:
+        f.write(base64.b64decode(creds_b64))
+
+# Build Drive client exactly as before
+SCOPES = ["https://www.googleapis.com/auth/drive.file"]
+credentials = service_account.Credentials.from_service_account_file(
+    "credentials.json", scopes=SCOPES
+)
+drive_service = build("drive", "v3", credentials=credentials)
+print("[INFO] Google Drive client connected (rollback version).")
 
 # ===== Constants =====
 LITERS_PER_GALLON = 4.54609
