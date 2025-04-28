@@ -1,5 +1,4 @@
-# Introducing attempt number 1,733
-# This is the deduplicated, cleaned version up to the eligibility logic section.
+# Introducing attempt number 1783
 
 import os
 import io
@@ -72,8 +71,8 @@ def download_from_drive(filename, mime_type="application/json"):
         ).execute()
 
         if not res["files"]:
-            print(f"[INFO] {filename} not found in Drive.")
-            return
+            print(f"[INFO] {filename} not found in Drive. Skipping download.")
+            return  # <- ADD THIS LINE
 
         file_id = res["files"][0]["id"]
         request = drive_service.files().get_media(fileId=file_id)
@@ -83,7 +82,6 @@ def download_from_drive(filename, mime_type="application/json"):
 
     except Exception as e:
         print(f"[ERROR] Failed to download {filename}: {e}")
-
 
 # ===== Constants =====
 LITERS_PER_GALLON = 4.54609
@@ -691,7 +689,6 @@ async def fetch_postal_close_date(show_id: str) -> Optional[datetime.date]:
     try:
         async with async_playwright() as pw:
             browser = await pw.chromium.launch()
-            context = await browser.new_context(storage_state=STORAGE_STATE_FILE if os.path.exists(STORAGE_STATE_FILE) else None)
             page = await context.new_page()
             await page.goto(f"https://www.fossedata.co.uk/show.asp?ShowID={show_id}", timeout=30000)
             html = await page.content()
