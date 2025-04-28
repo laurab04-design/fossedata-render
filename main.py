@@ -5,6 +5,7 @@ import asyncio
 import uvicorn
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, BackgroundTasks
+from typing import List
 from fossedata_core import full_run   # <-- make sure this exists!
 
 # ensure Playwright uses vendored browsers
