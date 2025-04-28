@@ -2,6 +2,7 @@
 import os
 import subprocess
 import asyncio
+import uvicorn
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fossedata_core import full_run   # <-- make sure this exists!
@@ -17,6 +18,12 @@ if not CHROMIUM.exists():
 # --- instantiate app BEFORE any @app.<method> ---
 app = FastAPI()
 
+# The default port is 8000, but on Render, the port is assigned dynamically
+port = os.getenv("PORT", 10000)  # Render expects this port, or it will use 10000 by default
+
+if __name__ == "__main__":
+    # Make sure to bind to 0.0.0.0 so it's accessible externally (not just localhost)
+    uvicorn.run(app, host="0.0.0.0", port=int(port))
 
 @app.get("/")
 async def root():
@@ -40,5 +47,5 @@ async def run_bg(background_tasks: BackgroundTasks):
     """
     Kicks off full_run() in the background (non-blocking).
     """
-    background_tasks.add_task(asyncio.create_task, full_run())
+    background_tasks.add_task(full_run)  # Directly pass the function here, not wrapped in asyncio.create_task
     return {"status": "started", "message": "Background scrape kicked off"}
