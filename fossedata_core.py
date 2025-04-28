@@ -1,5 +1,4 @@
 # Introducing attempt number 1,733
-
 # This is the deduplicated, cleaned version up to the eligibility logic section.
 
 import os
@@ -401,52 +400,49 @@ def save_results(results, clashes, overnights, travel_cache, processed_shows):
 
 
 def upload_to_google_drive():
-    """Upload output and cache files to Google Drive using service account."""
+    """Upload output and cache files to Google Drive using the already-initialised service account."""
+    if not drive_service:
+        print("[ERROR] Google Drive client not initialised.")
+        return
+    if not gdrive_folder_id:
+        print("[ERROR] GDRIVE_FOLDER_ID environment variable is not set.")
+        return
+
+    def upload_file(file_path, mime_type):
+        """Uploads a file to Google Drive in the specified folder."""
+        name = os.path.basename(file_path)
+        media = MediaFileUpload(file_path, mimetype=mime_type, resumable=False)
+
+        # Check if the file already exists in the folder
+        query = f"'{gdrive_folder_id}' in parents and name='{name}'"
+        result = drive_service.files().list(q=query, fields="files(id,name)").execute()
+        
+        if result.get("files"):
+            # If the file exists, update it
+            file_id = result['files'][0]['id']
+            drive_service.files().update(fileId=file_id, media_body=media).execute()
+            print(f"[INFO] Updated {name} on Drive.")
+        else:
+            # If the file doesn't exist, create it
+            file_metadata = {
+                'name': name,
+                'parents': [gdrive_folder_id]
+            }
+            drive_service.files().create(body=file_metadata, media_body=media).execute()
+            print(f"[INFO] Uploaded {name} to Drive.")
+
     try:
-        creds_info = json.loads(base64.b64decode(os.environ.get("GOOGLE_SERVICE_ACCOUNT_BASE64", "")))
-        creds = service_account.Credentials.from_service_account_info(
-            creds_info,
-            scopes=["https://www.googleapis.com/auth/drive.file"]
-        )
-        drive_service = build('drive', 'v3', credentials=creds)
-
-        # Fetch the folder ID from environment variables
-        gdrive_folder_id = os.getenv("GDRIVE_FOLDER_ID")
-        if not gdrive_folder_id:
-            print("[ERROR] GDRIVE_FOLDER_ID environment variable is not set.")
-            return
-
-        def upload_file(file_path, mime_type):
-            """Uploads a file to Google Drive in the specified folder."""
-            name = os.path.basename(file_path)
-            media = MediaFileUpload(file_path, mimetype=mime_type, resumable=False)
-
-            # Check if the file already exists in the folder
-            query = f"'{gdrive_folder_id}' in parents and name='{name}'"
-            result = drive_service.files().list(q=query, fields="files(id,name)").execute()
-            
-            if result.get("files"):
-                # If the file exists, update it
-                file_id = result['files'][0]['id']
-                drive_service.files().update(fileId=file_id, media_body=media).execute()
-            else:
-                # If the file doesn't exist, create it
-                file_metadata = {
-                    'name': name,
-                    'parents': [gdrive_folder_id]
-                }
-                drive_service.files().create(body=file_metadata, media_body=media).execute()
-
-        # Uploading the files to the specified folder
+        # Upload the files
         upload_file(RESULTS_JSON, "application/json")
         upload_file(RESULTS_CSV, "text/csv")
         upload_file(CLASH_OVERNIGHT_CSV, "text/csv")
         upload_file(TRAVEL_CACHE_FILE, "application/json")
         upload_file(PROCESSED_SHOWS_FILE, "application/json")
-        upload_file(STORAGE_STATE_FILE, "application/json")
+        if os.path.exists(STORAGE_STATE_FILE):
+            upload_file(STORAGE_STATE_FILE, "application/json")
 
     except Exception as e:
-        print(f"Warning: Google Drive upload failed: {e}")
+        print(f"[ERROR] Google Drive upload failed: {e}")
         
 def get_eligible_classes(
     text: str,
