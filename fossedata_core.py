@@ -62,7 +62,6 @@ else:
 
 def download_from_drive(filename, mime_type="application/json"):
     try:
-        gdrive_folder_id = os.environ.get("GDRIVE_FOLDER_ID")
         if not gdrive_folder_id:
             print("[ERROR] GDRIVE_FOLDER_ID not set for download.")
             return
