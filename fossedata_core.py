@@ -26,6 +26,41 @@ from collections import defaultdict
 
 load_dotenv()
 
+def fetch_aspx_links() -> List[str]:
+    """
+    Scrapes the FosseData shows page for links and saves them to 'aspx_links.txt'.
+    Returns a list of the show links.
+    """
+    url = "https://www.fossedata.co.uk/shows.aspx"
+    response = requests.get(url)
+    show_links = []
+
+    if response.status_code == 200:
+        content = response.text
+        # Match the links to show pages
+        show_links = re.findall(r'<a[^>]*href="show\.asp\?ShowID=\d+"[^>]*>(.*?)</a>', content)
+        
+        # Save the new links to a file (aspx_links.txt)
+        save_links(show_links)
+
+    return show_links
+    
+def save_links(links: List[str]):
+    """
+    Save the show links to 'aspx_links.txt'.
+    """
+    with open("aspx_links.txt", "w") as f:
+        for link in links:
+            f.write(f"{link}\n")
+            
+def read_existing_links() -> List[str]:
+    """Read show links from 'aspx_links.txt'."""
+    try:
+        with open("aspx_links.txt", "r") as f:
+            return [line.strip() for line in f.readlines() if line.strip()]
+    except FileNotFoundError:
+        return []
+
 # ===== Load Environment Variables Correctly =====
 DOG_NAME = os.getenv("DOG_NAME")
 DOG_DOB = date_parse(os.getenv("DOG_DOB")).date()
@@ -185,7 +220,7 @@ async def fetch_show_list(page) -> List[dict]:
         flags=re.DOTALL
     )
 
-    existing_links = read_existing_links()  # Use your helper to load existing links
+    existing_links = read_existing_links()
     new_links = set(existing_links)
 
     for show_id, name, date_str, venue in show_entries:
@@ -987,7 +1022,6 @@ def calculate_diesel_cost(distance_miles: float, price_per_litre: float, mpg: in
     litres_needed = gallons_needed * LITERS_PER_GALLON
     return round(litres_needed * price_per_litre, 2)
 
-# Modify full_run to await main_processing_loop
 async def full_run():
     """Fetch shows, process them, detect clashes/overnights, save & upload."""
     # 1) fetch the list of shows
@@ -995,14 +1029,14 @@ async def full_run():
         async with async_playwright() as pw:
             browser = await pw.chromium.launch()
             page = await browser.new_page()
-            shows = await fetch_show_list(page)
+            shows = await fetch_show_list(page)  # Fetch show links and details
             await browser.close()
             return shows
 
-    show_list = await _get_shows()
+    show_list = await _get_shows()  # Fetch the list of shows
 
     # 2) process each show
-    results = await main_processing_loop(show_list)  # Await async function
+    results = await main_processing_loop(show_list)  # Await async function to process shows
 
     # 3) detect clashes & overnight chains
     clashes = detect_clashes(results)
@@ -1010,11 +1044,10 @@ async def full_run():
 
     # 4) save & upload
     save_results(results, clashes, overnights, travel_cache, processed_shows)
-    upload_to_google_drive()
+    upload_to_google_drive()  # Upload to Google Drive
 
-    return results
+    return results  # Return processed results
 
 if __name__ == "__main__":
-    # run full_run() in a fresh loop when executed directly
-    final = asyncio.run(full_run())
+    final = asyncio.run(full_run())  # Execute full_run() asynchronously
     print(f"Processed {len(final)} shows.")
