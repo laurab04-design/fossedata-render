@@ -47,5 +47,29 @@ async def run_bg(background_tasks: BackgroundTasks):
     """
     Kicks off full_run() in the background (non-blocking).
     """
-    background_tasks.add_task(full_run)  # Directly pass the function here, not wrapped in asyncio.create_task
+    # This is an asynchronous task, so let's add it to the background
+    background_tasks.add_task(run_full_run)
     return {"status": "started", "message": "Background scrape kicked off"}
+
+async def run_full_run():
+    """
+    This function will run the full_run() and handle all steps in the background.
+    """
+    try:
+        print("Starting background process...")
+        # Await the results from the full_run coroutine
+        results = await full_run()
+
+        # Now that full_run() is finished, detect clashes
+        clashes = detect_clashes(results)
+
+        # Handle other processes like overnights and saving results
+        overnights = detect_overnight_pairs(results, travel_cache)
+        save_results(results, clashes, overnights, travel_cache, processed_shows)
+
+        # Upload to Google Drive
+        upload_to_google_drive()
+
+        print("Processing complete.")
+    except Exception as e:
+        print(f"Error during background run: {e}")
