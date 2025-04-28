@@ -1,5 +1,7 @@
 # Introducing attempt number 1,733
 
+# This is the deduplicated, cleaned version up to the eligibility logic section.
+
 import os
 import io
 import re
@@ -30,6 +32,7 @@ DOG_DOB = date_parse(os.getenv("DOG_DOB")).date()
 MPG = int(os.getenv("MPG"))
 MAX_PAIR_GAP_MINUTES = int(os.getenv("MAX_PAIR_GAP_MINUTES"))
 google_service_account_key = os.getenv("GOOGLE_SERVICE_ACCOUNT_BASE64")
+gdrive_folder_id = os.getenv("GDRIVE_FOLDER_ID")
 
 # Build Drive client exactly as before
 SCOPES = ["https://www.googleapis.com/auth/drive.file"]
@@ -398,17 +401,34 @@ def upload_to_google_drive():
         )
         drive_service = build('drive', 'v3', credentials=creds)
 
+        # Fetch the folder ID from environment variables
+        folder_id = os.getenv("GDRIVE_FOLDER_ID")
+        if not folder_id:
+            print("[ERROR] GDRIVE_FOLDER_ID environment variable is not set.")
+            return
+
         def upload_file(file_path, mime_type):
+            """Uploads a file to Google Drive in the specified folder."""
             name = os.path.basename(file_path)
             media = MediaFileUpload(file_path, mimetype=mime_type, resumable=False)
-            result = drive_service.files().list(q=f"name='{name}'", fields="files(id,name)").execute()
-            if result.get('files'):
+
+            # Check if the file already exists in the folder
+            query = f"'{folder_id}' in parents and name='{name}'"
+            result = drive_service.files().list(q=query, fields="files(id,name)").execute()
+            
+            if result.get("files"):
+                # If the file exists, update it
                 file_id = result['files'][0]['id']
                 drive_service.files().update(fileId=file_id, media_body=media).execute()
             else:
-                file_metadata = {'name': name}
+                # If the file doesn't exist, create it
+                file_metadata = {
+                    'name': name,
+                    'parents': [folder_id]
+                }
                 drive_service.files().create(body=file_metadata, media_body=media).execute()
 
+        # Uploading the files to the specified folder
         upload_file(RESULTS_JSON, "application/json")
         upload_file(RESULTS_CSV, "text/csv")
         upload_file(CLASH_OVERNIGHT_CSV, "text/csv")
