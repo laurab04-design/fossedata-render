@@ -156,10 +156,13 @@ def fetch_gov_diesel_price():
 diesel_price_per_litre = fetch_gov_diesel_price()
 print(f"Gov diesel price: £{diesel_price_per_litre:.2f} per litre")
 
+import os
+
 async def fetch_show_list(page) -> List[dict]:
     """
     Scrape the Fosse Data site for upcoming shows.
     Returns a list of shows with ID, name, date, venue, and type.
+    Also refreshes aspx_links.txt by adding new links and not changing old ones.
     """
     shows = []
     await page.goto("https://www.fossedata.co.uk/shows.aspx", timeout=60000)
@@ -171,6 +174,15 @@ async def fetch_show_list(page) -> List[dict]:
         flags=re.DOTALL
     )
 
+    # Initialize an empty set to store show links
+    existing_links = set()
+
+    # Read existing links from aspx_links.txt
+    if os.path.exists("aspx_links.txt"):
+        with open("aspx_links.txt", "r") as file:
+            existing_links = set(file.read().splitlines())
+
+    # Go through the fetched show entries and add to list
     for date_str, name, venue, showid in show_entries:
         try:
             show_date = datetime.datetime.strptime(date_str, "%d %B %Y").date()
@@ -190,16 +202,27 @@ async def fetch_show_list(page) -> List[dict]:
 
         show_id = showid.strip() if showid else f"{show_name}_{show_date}"
 
-        shows.append({
+        # Add show to the list of shows
+        show_info = {
             "id": show_id,
             "show_name": show_name,
             "date": show_date,
             "venue": venue,
             "type": show_type
-        })
+        }
+        shows.append(show_info)
+
+        # Add the show ID to the existing links to prevent duplicates
+        if show_id not in existing_links:
+            existing_links.add(show_id)
+
+    # Write back the updated list of links to aspx_links.txt
+    with open("aspx_links.txt", "w") as file:
+        for link in existing_links:
+            file.write(f"{link}\n")
 
     return shows
-
+ 
 async def download_schedule_for_show(context, show: dict) -> Optional[str]:
     """
     Download the schedule PDF for a given show via Playwright (with POST fallback).
