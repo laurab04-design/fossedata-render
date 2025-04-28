@@ -16,12 +16,6 @@ CHROMIUM = Path("/opt/render/.cache/ms-playwright/chromium")
 if not CHROMIUM.exists():
     subprocess.run(["playwright", "install", "chromium"], check=False)
 
-import os
-import json
-import datetime
-import requests
-from pathlib import Path
-
 # This is a function to read the existing links in aspx_links.txt
 def read_existing_links():
     try:
