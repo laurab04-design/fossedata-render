@@ -1,5 +1,7 @@
 # Introducing attempt number 1783
 
+# This is the deduplicated, cleaned version up to the eligibility logic section.
+
 import os
 import io
 import re
@@ -95,7 +97,6 @@ RESULTS_CSV = "results.csv"
 RESULTS_JSON = "results.json"
 CLASH_OVERNIGHT_CSV = "clashes_overnight.csv"
 
-processed_shows = set()
 travel_cache = {}
 
 download_from_drive("processed_shows.json")
@@ -113,6 +114,8 @@ CC_TRIGGER_WORDS = [w.strip().lower() for w in os.getenv("CC_TRIGGER_WORDS", "")
 RCC_TRIGGER_WORDS = [w.strip().lower() for w in os.getenv("RCC_TRIGGER_WORDS", "").split(",") if w.strip()]
 
 # ===== Load Cache =====
+processed_shows = set()  # <- Always define it, even if the file is missing
+
 if os.path.isfile(PROCESSED_SHOWS_FILE):
     try:
         with open(PROCESSED_SHOWS_FILE, "r") as f:
@@ -120,7 +123,6 @@ if os.path.isfile(PROCESSED_SHOWS_FILE):
             processed_shows = set(data if isinstance(data, list) else data.keys())
     except Exception as e:
         print(f"Warning: Could not load {PROCESSED_SHOWS_FILE}: {e}")
-
 if os.path.isfile(TRAVEL_CACHE_FILE):
     try:
         with open(TRAVEL_CACHE_FILE, "r") as f:
@@ -151,6 +153,20 @@ def fetch_gov_diesel_price():
 
 diesel_price_per_litre = fetch_gov_diesel_price()
 print(f"Gov diesel price: £{diesel_price_per_litre:.2f} per litre")
+
+def read_existing_links() -> List[str]:
+    """Read show IDs from aspx_links.txt if present."""
+    try:
+        with open("aspx_links.txt", "r") as f:
+            return [line.strip() for line in f.readlines() if line.strip()]
+    except FileNotFoundError:
+        return []
+
+def save_links(links: set):
+    """Save show IDs to aspx_links.txt."""
+    with open("aspx_links.txt", "w") as f:
+        for link in sorted(links):
+            f.write(f"{link}\n")
 
 async def fetch_show_list(page) -> List[dict]:
     """
@@ -689,6 +705,7 @@ async def fetch_postal_close_date(show_id: str) -> Optional[datetime.date]:
     try:
         async with async_playwright() as pw:
             browser = await pw.chromium.launch()
+            
             page = await context.new_page()
             await page.goto(f"https://www.fossedata.co.uk/show.asp?ShowID={show_id}", timeout=30000)
             html = await page.content()
@@ -738,12 +755,12 @@ def parse_postal_close_date_from_html(html: str) -> Optional[datetime.date]:
         return None
         
 async def main_processing_loop(show_list: list):
+    global processed_shows
     """
     Main loop to process shows, check eligibility, calculate costs, JW points, etc.
     """
     wins_log = load_wins_log()
     results = []
-    processed_shows = set()
 
     for show in show_list:
         show_id = show.get("id")
