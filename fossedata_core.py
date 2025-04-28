@@ -1,5 +1,7 @@
 # Introducing attempt number 1,733
 
+# This is the deduplicated, cleaned version up to the eligibility logic section.
+
 import os
 import io
 import re
@@ -60,13 +62,13 @@ else:
 
 def download_from_drive(filename, mime_type="application/json"):
     try:
-        folder_id = os.environ.get("GDRIVE_FOLDER_ID")
-        if not folder_id:
+        gdrive_folder_id = os.environ.get("GDRIVE_FOLDER_ID")
+        if not gdrive_folder_id:
             print("[ERROR] GDRIVE_FOLDER_ID not set for download.")
             return
 
         res = drive_service.files().list(
-            q=f"name='{filename}' and trashed=false and '{folder_id}' in parents",
+            q=f"name='{filename}' and trashed=false and '{gdrive_folder_id}' in parents",
             spaces="drive",
             fields="files(id, name)"
         ).execute()
@@ -154,70 +156,57 @@ def fetch_gov_diesel_price():
 diesel_price_per_litre = fetch_gov_diesel_price()
 print(f"Gov diesel price: £{diesel_price_per_litre:.2f} per litre")
 
-import os
-
 async def fetch_show_list(page) -> List[dict]:
     """
-    Scrape the Fosse Data site for upcoming shows.
+    Scrape the FosseData shows.aspx page properly, extracting numeric ShowIDs.
     Returns a list of shows with ID, name, date, venue, and type.
-    Also refreshes aspx_links.txt by adding new links and not changing old ones.
+    Also refreshes aspx_links.txt with these numeric IDs.
     """
     shows = []
     await page.goto("https://www.fossedata.co.uk/shows.aspx", timeout=60000)
     content = await page.content()
 
+    # Match the proper show block and numeric ID
     show_entries = re.findall(
-        r"(?P<date>\d{1,2} \w+ 20\d{2}).+?(?P<name>[A-Z][^<]+Show)[^<]*(?P<venue>[A-Z][^<]+)(?P<link>ShowID=\d+)?",
+        r'<a[^>]*href="show\.asp\?ShowID=(\d+)"[^>]*>(.*?)</a>.*?(\d{1,2} \w+ 20\d{2}).*?<td[^>]*>(.*?)</td>',
         content,
         flags=re.DOTALL
     )
 
-    # Initialize an empty set to store show links
-    existing_links = set()
+    existing_links = read_existing_links()  # Use your helper to load existing links
+    new_links = set(existing_links)
 
-    # Read existing links from aspx_links.txt
-    if os.path.exists("aspx_links.txt"):
-        with open("aspx_links.txt", "r") as file:
-            existing_links = set(file.read().splitlines())
-
-    # Go through the fetched show entries and add to list
-    for date_str, name, venue, showid in show_entries:
+    for show_id, name, date_str, venue in show_entries:
         try:
-            show_date = datetime.datetime.strptime(date_str, "%d %B %Y").date()
+            show_date = datetime.datetime.strptime(date_str.strip(), "%d %B %Y").date()
         except ValueError:
-            try:
-                show_date = datetime.datetime.strptime(date_str, "%d %b %Y").date()
-            except ValueError:
-                show_date = None
+            continue  # Skip if date parsing fails
 
-        show_name = name.strip()
-        venue = venue.strip()
         show_type = "Unknown"
-        if "Championship Show" in show_name or "Ch. Show" in show_name:
+        name_lower = name.lower()
+        if "championship" in name_lower:
             show_type = "Championship"
-        elif "Open Show" in show_name or "Premier" in show_name:
-            show_type = "Premier Open" if "Premier" in show_name else "Open"
+        elif "premier" in name_lower:
+            show_type = "Premier Open"
+        elif "open" in name_lower:
+            show_type = "Open"
 
-        show_id = showid.strip() if showid else f"{show_name}_{show_date}"
+        # Skip if already processed
+        if show_id in existing_links:
+            continue
 
-        # Add show to the list of shows
         show_info = {
             "id": show_id,
-            "show_name": show_name,
+            "show_name": name.strip(),
             "date": show_date,
-            "venue": venue,
+            "venue": venue.strip(),
             "type": show_type
         }
         shows.append(show_info)
+        new_links.add(show_id)
 
-        # Add the show ID to the existing links to prevent duplicates
-        if show_id not in existing_links:
-            existing_links.add(show_id)
-
-    # Write back the updated list of links to aspx_links.txt
-    with open("aspx_links.txt", "w") as file:
-        for link in existing_links:
-            file.write(f"{link}\n")
+    # Save back the updated links
+    save_links(new_links)
 
     return shows
  
@@ -423,8 +412,8 @@ def upload_to_google_drive():
         drive_service = build('drive', 'v3', credentials=creds)
 
         # Fetch the folder ID from environment variables
-        folder_id = os.getenv("GDRIVE_FOLDER_ID")
-        if not folder_id:
+        gdrive_folder_id = os.getenv("GDRIVE_FOLDER_ID")
+        if not gdrive_folder_id:
             print("[ERROR] GDRIVE_FOLDER_ID environment variable is not set.")
             return
 
@@ -434,7 +423,7 @@ def upload_to_google_drive():
             media = MediaFileUpload(file_path, mimetype=mime_type, resumable=False)
 
             # Check if the file already exists in the folder
-            query = f"'{folder_id}' in parents and name='{name}'"
+            query = f"'{gdrive_folder_id}' in parents and name='{name}'"
             result = drive_service.files().list(q=query, fields="files(id,name)").execute()
             
             if result.get("files"):
@@ -445,7 +434,7 @@ def upload_to_google_drive():
                 # If the file doesn't exist, create it
                 file_metadata = {
                     'name': name,
-                    'parents': [folder_id]
+                    'parents': [gdrive_folder_id]
                 }
                 drive_service.files().create(body=file_metadata, media_body=media).execute()
 
