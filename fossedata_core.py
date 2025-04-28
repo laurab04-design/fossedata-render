@@ -1,4 +1,4 @@
-# This is the deduplicated, cleaned version up to the eligibility logic section.
+# Introducing attempt number 1,733
 
 import os
 import io
@@ -29,14 +29,33 @@ DOG_NAME = os.getenv("DOG_NAME")
 DOG_DOB = date_parse(os.getenv("DOG_DOB")).date()
 MPG = int(os.getenv("MPG"))
 MAX_PAIR_GAP_MINUTES = int(os.getenv("MAX_PAIR_GAP_MINUTES"))
+google_service_account_key = os.getenv("GOOGLE_SERVICE_ACCOUNT_BASE64")
 
 # Build Drive client exactly as before
 SCOPES = ["https://www.googleapis.com/auth/drive.file"]
-credentials = service_account.Credentials.from_service_account_file(
-    "credentials.json", scopes=SCOPES
-)
-drive_service = build("drive", "v3", credentials=credentials)
-print("[INFO] Google Drive client connected (rollback version).")
+
+if google_service_account_key:
+    try:
+        # Decode the base64 string into bytes
+        decoded_key = base64.b64decode(google_service_account_key)
+
+        # Convert bytes to a JSON string and then load it into a dictionary
+        service_account_info = json.loads(decoded_key.decode("utf-8"))
+
+        # Authenticate with the Google API using the decoded key
+        credentials = service_account.Credentials.from_service_account_info(
+            service_account_info,
+            scopes=["https://www.googleapis.com/auth/drive.file"]
+        )
+
+        # Build the drive service client
+        drive_service = build("drive", "v3", credentials=credentials)
+        print("[INFO] Google Drive client connected.")
+
+    except Exception as e:
+        print(f"[ERROR] Failed to decode or authenticate with service account: {e}")
+else:
+    print("[ERROR] GOOGLE_SERVICE_ACCOUNT_BASE64 environment variable is not set.")
 
 def download_from_drive(filename, mime_type="application/json"):
     try:
