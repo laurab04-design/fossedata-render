@@ -1,7 +1,5 @@
 # Introducing attempt number 1,733
 
-# This is the deduplicated, cleaned version up to the eligibility logic section.
-
 import os
 import io
 import re
@@ -785,7 +783,7 @@ async def main_processing_loop(show_list: list):
                 await browser.close()
                 return pdf_path
 
-        pdf_path = asyncio.run(download_and_parse())
+        pdf_path = await download_and_parse()  # Await async function
         if not pdf_path:
             print(f"Skipping {show.get('show_name')} (no schedule PDF)")
             continue
@@ -991,6 +989,7 @@ def calculate_diesel_cost(distance_miles: float, price_per_litre: float, mpg: in
     litres_needed = gallons_needed * LITERS_PER_GALLON
     return round(litres_needed * price_per_litre, 2)
 
+# Modify full_run to await main_processing_loop
 async def full_run():
     """Fetch shows, process them, detect clashes/overnights, save & upload."""
     # 1) fetch the list of shows
@@ -1005,7 +1004,7 @@ async def full_run():
     show_list = await _get_shows()
 
     # 2) process each show
-    results = main_processing_loop(show_list)
+    results = await main_processing_loop(show_list)  # Await async function
 
     # 3) detect clashes & overnight chains
     clashes = detect_clashes(results)
