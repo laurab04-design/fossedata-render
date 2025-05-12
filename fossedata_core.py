@@ -94,7 +94,7 @@ STORAGE_STATE_FILE = "storage_state.json"
 RESULTS_CSV = "results.csv"
 RESULTS_JSON = "results.json"
 CLASH_OVERNIGHT_CSV = "clashes_overnight.csv"
-ASPX_LINKS = ("aspx_links.txt")
+ASPX_LINKS = "aspx_links.txt"
 
 travel_cache = {}
 
@@ -238,17 +238,15 @@ async def download_schedule_for_show(context, show: dict) -> Optional[str]:
     Download the schedule PDF for a given show via Playwright (with POST fallback).
     Returns the local PDF file path, or None if failed.
     """
-    # Handle both legacy ID and new vanity URL
     show_url = show.get("url")
     if not show_url:
         return None
 
-    # Use a clean filename
     safe_id = re.sub(r'[^\w\-]', '_', show_url.split('/')[-1])
     schedule_pdf_path = f"schedule_{safe_id}.pdf"
 
+    page = await context.new_page()
     try:
-        page = await context.new_page()
         await page.goto(show_url, timeout=30000)
 
         download_link_elem = await page.query_selector("a:text(\"Schedule\")")
@@ -272,11 +270,17 @@ async def download_schedule_for_show(context, show: dict) -> Optional[str]:
                 download = await download_task
                 await download.save_as(schedule_pdf_path)
             except Exception as e:
-                raise e
+                print(f"[ERROR] Fallback download failed for {show_url}: {e}")
+                return None
 
-        await page.close()
         return schedule_pdf_path
-    return None
+
+    except Exception as e:
+        print(f"[ERROR] Failed to download schedule for {show_url}: {e}")
+        return None
+
+    finally:
+        await page.close()
     
 def parse_pdf_for_info(pdf_path: str) -> Optional[dict]:
     """
