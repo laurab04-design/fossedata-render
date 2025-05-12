@@ -486,6 +486,7 @@ def upload_to_google_drive():
         upload_file(CLASH_OVERNIGHT_CSV, "text/csv")
         upload_file(TRAVEL_CACHE_FILE, "application/json")
         upload_file(PROCESSED_SHOWS_FILE, "application/json")
+        upload_file(ASPX_LINKS, "text/plain")
         if os.path.exists(STORAGE_STATE_FILE):
             upload_file(STORAGE_STATE_FILE, "application/json")
 
@@ -739,9 +740,10 @@ async def fetch_postal_close_date(show_id: str) -> Optional[datetime.date]:
     try:
         async with async_playwright() as pw:
             browser = await pw.chromium.launch()
-            
+            context = await browser.new_context(storage_state=STORAGE_STATE_FILE if os.path.exists(STORAGE_STATE_FILE) else None)
             page = await context.new_page()
-            target_url = show.get("url") or f"https://www.fossedata.co.uk/show.asp?ShowID={show_id}"
+
+            target_url = f"https://www.fossedata.co.uk/show.asp?ShowID={show_id}"
             await page.goto(target_url, timeout=30000)
             html = await page.content()
             await context.storage_state(path=STORAGE_STATE_FILE)
@@ -751,7 +753,7 @@ async def fetch_postal_close_date(show_id: str) -> Optional[datetime.date]:
 
     except Exception as e:
         print(f"Warning: Failed to fetch postal close date for show {show_id}: {e}")
-    return None
+        return None
     
 def parse_postal_close_date_from_html(html: str) -> Optional[datetime.date]:
     """Extract postal close date from show page HTML."""
