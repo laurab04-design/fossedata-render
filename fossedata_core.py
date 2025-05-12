@@ -24,31 +24,6 @@ from collections import defaultdict
 
 load_dotenv()
 
-def fetch_aspx_links() -> List[str]:
-    """
-    Scrapes the FosseData shows page for all show URLs (old and new format)
-    and saves them to 'aspx_links.txt'.
-    Returns a list of full show URLs.
-    """
-    url = "https://www.fossedata.co.uk/shows.aspx"
-    response = requests.get(url)
-    show_links = []
-
-    if response.status_code == 200:
-        content = response.text
-
-        # Match both legacy and pretty URLs
-        classic_links = re.findall(r'href="(/show\.asp\?ShowID=\d+)"', content)
-        pretty_links = re.findall(r'href="(/shows/[^"]+\.aspx)"', content)
-
-        all_links = classic_links + pretty_links
-        show_links = [f"https://www.fossedata.co.uk{link}" for link in all_links]
-
-        # Save to file
-        save_links(show_links)
-
-    return show_links
-
 # ===== Load Environment Variables Correctly =====
 DOG_NAME = os.getenv("DOG_NAME")
 DOG_DOB = date_parse(os.getenv("DOG_DOB")).date()
@@ -188,48 +163,50 @@ def read_existing_links() -> List[str]:
         return []
 
 def save_links(links: set):
-    """Save show IDs to aspx_links.txt."""
+    """Save show URLs to aspx_links.txt."""
+    if not links:
+        print("[WARNING] save_links() called with empty set.")
+        return
     with open("aspx_links.txt", "w") as f:
         for link in sorted(links):
             f.write(f"{link}\n")
-
+    print(f"[INFO] Wrote {len(links)} links to aspx_links.txt")
+    
+    
 async def fetch_show_list(page) -> List[dict]:
     """
-    Scrapes updated FosseData shows.aspx for all show listings (modern format).
-    Extracts name, date, and full URL. Venue no longer available on this page.
+    Scrapes FosseData shows.aspx for all show listings.
+    Extracts name, date, venue, type, and full URL. Avoids duplicates in aspx_links.txt.
     """
     await page.goto("https://www.fossedata.co.uk/shows.aspx", timeout=60000)
     html = await page.content()
     soup = BeautifulSoup(html, "html.parser")
+    table_rows = soup.select("table tbody tr")
 
     existing_links = set(read_existing_links())
     new_links = set(existing_links)
     shows = []
 
-    forms = soup.select("form[action^='/shows/']")
-    for form in forms:
-        action = form.get("action", "")
-        show_url = f"https://www.fossedata.co.uk{action}"
-        if show_url in existing_links:
+    for row in table_rows:
+        link_tag = row.find("a", href=True)
+        cells = row.find_all("td")
+        if not link_tag or len(cells) < 3:
             continue
 
-        # Find the <h2> with the show name
-        name_elem = form.select_one("h2")
-        show_name = name_elem.get_text(strip=True) if name_elem else "Unknown Show"
+        href = link_tag["href"]
+        show_name = link_tag.get_text(strip=True)
+        show_url = f"https://www.fossedata.co.uk{href}"
+        date_text = cells[1].get_text(strip=True)
+        venue = cells[2].get_text(strip=True)
 
-        # Find the first <td> that looks like a date
-        td_elems = form.select("td")
-        show_date = None
-        for td in td_elems:
-            match = re.search(r"\b\d{1,2} \w+ 20\d{2}\b", td.text)
-            if match:
-                try:
-                    show_date = datetime.datetime.strptime(match.group(0), "%d %B %Y").date()
-                    break
-                except Exception:
-                    continue
+        try:
+            show_date = datetime.datetime.strptime(date_text, "%d %B %Y").date()
+        except ValueError:
+            continue
 
-        # Determine show type from name
+        if show_url in existing_links:
+            continue  # Already recorded
+
         name_lower = show_name.lower()
         if "championship" in name_lower:
             show_type = "Championship"
@@ -244,7 +221,7 @@ async def fetch_show_list(page) -> List[dict]:
             "id": show_url,
             "show_name": show_name,
             "date": show_date,
-            "venue": "",  # Venue not available anymore
+            "venue": venue,
             "type": show_type,
             "url": show_url
         }
@@ -252,6 +229,7 @@ async def fetch_show_list(page) -> List[dict]:
         shows.append(show_info)
         new_links.add(show_url)
 
+    # Save new links to file (used later by Drive sync)
     save_links(new_links)
     return shows
  
