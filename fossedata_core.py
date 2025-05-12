@@ -175,8 +175,8 @@ def save_links(links: set):
     
 async def fetch_show_list(page) -> List[dict]:
     """
-    Scrapes FosseData shows.aspx for all show listings.
-    Extracts name, date, venue, type, and full URL. Avoids duplicates in aspx_links.txt.
+    Scrapes FosseData shows/Shows-To-Enter.aspx for all show listings.
+    Extracts name, date, venue, type, and full URL. Handles new .aspx link format.
     """
     await page.goto("https://fossedata.co.uk/shows/Shows-To-Enter.aspx", timeout=60000)
     html = await page.content()
@@ -194,6 +194,9 @@ async def fetch_show_list(page) -> List[dict]:
             continue
 
         href = link_tag["href"]
+        if not href.lower().endswith(".aspx"):
+            continue  # Skip non-aspx links
+
         show_name = link_tag.get_text(strip=True)
         show_url = f"https://www.fossedata.co.uk{href}"
         date_text = cells[1].get_text(strip=True)
@@ -218,7 +221,7 @@ async def fetch_show_list(page) -> List[dict]:
             show_type = "Unknown"
 
         show_info = {
-            "id": show_url,
+            "id": show_url,  # still using URL as ID
             "show_name": show_name,
             "date": show_date,
             "venue": venue,
@@ -229,7 +232,6 @@ async def fetch_show_list(page) -> List[dict]:
         shows.append(show_info)
         new_links.add(show_url)
 
-    # Save new links to file (used later by Drive sync)
     save_links(new_links)
     return shows
  
