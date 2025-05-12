@@ -742,7 +742,7 @@ async def fetch_postal_close_date(show_id: str) -> Optional[datetime.date]:
             
             page = await context.new_page()
             target_url = show.get("url") or f"https://www.fossedata.co.uk/show.asp?ShowID={show_id}"
-						await page.goto(target_url, timeout=30000)
+	    await page.goto(target_url, timeout=30000)
             html = await page.content()
             await context.storage_state(path=STORAGE_STATE_FILE)
             await browser.close()
