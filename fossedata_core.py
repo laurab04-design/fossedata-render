@@ -36,7 +36,8 @@ def fetch_aspx_links() -> List[str]:
     if response.status_code == 200:
         content = response.text
         # Match the links to show pages
-        show_links = re.findall(r'<a[^>]*href="show\.asp\?ShowID=\d+"[^>]*>(.*?)</a>', content)
+        show_links = re.findall(r'href="(show\.asp\?ShowID=\d+)"', content)
+        show_links = [f"https://www.fossedata.co.uk/{link}" for link in show_links]
         
         # Save the new links to a file (aspx_links.txt)
         save_links(show_links)
@@ -129,6 +130,7 @@ STORAGE_STATE_FILE = "storage_state.json"
 RESULTS_CSV = "results.csv"
 RESULTS_JSON = "results.json"
 CLASH_OVERNIGHT_CSV = "clashes_overnight.csv"
+ASPX_LINKS = "aspx_links.json")
 
 travel_cache = {}
 
@@ -136,6 +138,7 @@ download_from_drive("processed_shows.json")
 download_from_drive("travel_cache.json")
 download_from_drive("storage_state.json")
 download_from_drive("wins_log.json")
+download_from_drive("aspx_links.txt")
 
 # These come in as strings, so we convert:
 HANDLER_HAS_CC = os.getenv("HANDLER_HAS_CC", "false").lower() == "true"
