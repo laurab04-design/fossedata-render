@@ -155,13 +155,13 @@ diesel_price_per_litre = fetch_gov_diesel_price()
 print(f"Gov diesel price: £{diesel_price_per_litre:.2f} per litre")
 
 def read_existing_links() -> List[str]:
-    """Read show IDs from aspx_links.txt if present."""
+    """Read show URLs from aspx_links.txt if present."""
     try:
         with open("aspx_links.txt", "r") as f:
-            return [line.strip() for line in f.readlines() if line.strip()]
+            return [line.strip() for line in f if line.strip()]
     except FileNotFoundError:
         return []
-
+        
 def save_links(links: set):
     """Save show URLs to aspx_links.txt."""
     if not links:
@@ -239,17 +239,17 @@ async def download_schedule_for_show(context, show: dict) -> Optional[str]:
     Returns the local PDF file path, or None if failed.
     """
     # Handle both legacy ID and new vanity URL
-    target_url = show.get("url") or show.get("id")
-    if not target_url:
+    show_url = show.get("url")
+    if not show_url:
         return None
 
     # Use a clean filename
-    safe_id = re.sub(r'[^\w\-]', '_', target_url.split('/')[-1])
+    safe_id = re.sub(r'[^\w\-]', '_', show_url.split('/')[-1])
     schedule_pdf_path = f"schedule_{safe_id}.pdf"
 
     try:
         page = await context.new_page()
-        await page.goto(target_url, timeout=30000)
+        await page.goto(show_url, timeout=30000)
 
         download_link_elem = await page.query_selector("a:text(\"Schedule\")")
         download_link = await download_link_elem.get_attribute("href") if download_link_elem else None
@@ -276,24 +276,6 @@ async def download_schedule_for_show(context, show: dict) -> Optional[str]:
 
         await page.close()
         return schedule_pdf_path
-
-    except Exception:
-        # POST fallback if Playwright failed
-        try:
-            if show_id and show_id.isdigit():
-                pdf_response = requests.post(
-                    "https://www.fossedata.co.uk/downloadSchedule.asp",
-                    data={"ShowID": show_id},
-                    timeout=15
-                )
-                if pdf_response.status_code == 200:
-                    with open(schedule_pdf_path, "wb") as f:
-                        f.write(pdf_response.content)
-                    print(f"Used fallback POST to download schedule for {show.get('show_name')}")
-                    return schedule_pdf_path
-        except Exception as e2:
-            print(f"Error downloading schedule for {show.get('show_name')}: {e2}")
-
     return None
     
 def parse_pdf_for_info(pdf_path: str) -> Optional[dict]:
@@ -712,7 +694,7 @@ def load_wins_log() -> list:
         print(f"Error loading {WINS_LOG_FILE}: {e}")
         return []
         
-async def fetch_postal_close_date(show_id: str) -> Optional[datetime.date]:
+async def fetch_postal_close_date(show_url: str) -> Optional[datetime.date]:
     """
     Scrape the postal close date for a show from its main aspx page.
     Returns a date object if found, else None.
@@ -722,9 +704,7 @@ async def fetch_postal_close_date(show_id: str) -> Optional[datetime.date]:
             browser = await pw.chromium.launch()
             context = await browser.new_context(storage_state=STORAGE_STATE_FILE if os.path.exists(STORAGE_STATE_FILE) else None)
             page = await context.new_page()
-
-            target_url = f"https://www.fossedata.co.uk/show.asp?ShowID={show_id}"
-            await page.goto(target_url, timeout=30000)
+            await page.goto(show_url, timeout=30000)
             html = await page.content()
             await context.storage_state(path=STORAGE_STATE_FILE)
             await browser.close()
@@ -732,7 +712,7 @@ async def fetch_postal_close_date(show_id: str) -> Optional[datetime.date]:
         return parse_postal_close_date_from_html(html)
 
     except Exception as e:
-        print(f"Warning: Failed to fetch postal close date for show {show_id}: {e}")
+        print(f"Warning: Failed to fetch postal close date for show {show_url}: {e}")
         return None
     
 def parse_postal_close_date_from_html(html: str) -> Optional[datetime.date]:
@@ -780,13 +760,13 @@ async def main_processing_loop(show_list: list):
     results = []
 
     for show in show_list:
-        show_id = show.get("id")
-        if not show_id or show_id in processed_shows:
+        show_url = show.get("url")
+        if not show_url or show_url in processed_shows:
             continue
 
         print(f"Processing show: {show.get('show_name')} on {show.get('date')}")
         
-        postal_close_date = await fetch_postal_close_date(show_id)
+        postal_close_date = await fetch_postal_close_date(show_url)
 
         # ===== Schedule Download =====
         async def download_and_parse():
@@ -845,7 +825,7 @@ async def main_processing_loop(show_list: list):
 
         # ===== Build Result Row =====
         result = {
-            "show_id": show_id,
+            "show_url": show_url,
             "show_name": show.get("show_name"),
             "show_date": show.get("date").isoformat() if isinstance(show.get("date"), datetime.date) else show.get("date"),
             "venue": venue,
@@ -864,7 +844,7 @@ async def main_processing_loop(show_list: list):
         }
 
         results.append(result)
-        processed_shows.add(show_id)
+        processed_shows.add(show_url)
 
         # Periodic save
         if len(results) % 5 == 0:
