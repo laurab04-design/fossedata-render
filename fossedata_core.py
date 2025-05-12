@@ -178,7 +178,7 @@ async def fetch_show_list(page) -> List[dict]:
     Scrapes FosseData shows.aspx for all show listings.
     Extracts name, date, venue, type, and full URL. Avoids duplicates in aspx_links.txt.
     """
-    await page.goto("https://www.fossedata.co.uk/shows.aspx", timeout=60000)
+    await page.goto("https://fossedata.co.uk/shows/Shows-To-Enter.aspx", timeout=60000)
     html = await page.content()
     soup = BeautifulSoup(html, "html.parser")
     table_rows = soup.select("table tbody tr")
