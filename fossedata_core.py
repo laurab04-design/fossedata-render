@@ -119,7 +119,7 @@ STORAGE_STATE_FILE = "storage_state.json"
 RESULTS_CSV = "results.csv"
 RESULTS_JSON = "results.json"
 CLASH_OVERNIGHT_CSV = "clashes_overnight.csv"
-ASPX_LINKS = "aspx_links.json")
+ASPX_LINKS = "aspx_links.txt")
 
 travel_cache = {}
 
@@ -195,56 +195,62 @@ def save_links(links: set):
 
 async def fetch_show_list(page) -> List[dict]:
     """
-    Scrape the FosseData shows.aspx page properly, extracting numeric ShowIDs.
-    Returns a list of shows with ID, name, date, venue, and type.
-    Also refreshes aspx_links.txt with these numeric IDs.
+    Scrapes FosseData shows.aspx for all show listings (legacy and modern).
+    Extracts name, date, venue, type, and full URL.
     """
-    shows = []
     await page.goto("https://www.fossedata.co.uk/shows.aspx", timeout=60000)
-    content = await page.content()
+    html = await page.content()
 
-    # Match the proper show block and numeric ID
-    show_entries = re.findall(
-        r'<a[^>]*href="show\.asp\?ShowID=(\d+)"[^>]*>(.*?)</a>.*?(\d{1,2} \w+ 20\d{2}).*?<td[^>]*>(.*?)</td>',
-        content,
-        flags=re.DOTALL
-    )
+    soup = BeautifulSoup(html, "html.parser")
+    table_rows = soup.select("table tbody tr")
 
-    existing_links = read_existing_links()
+    existing_links = set(read_existing_links())
     new_links = set(existing_links)
+    shows = []
 
-    for show_id, name, date_str, venue in show_entries:
+    for row in table_rows:
+        link_tag = row.find("a", href=True)
+        cells = row.find_all("td")
+        if not link_tag or len(cells) < 3:
+            continue
+
+        href = link_tag["href"]
+        show_name = link_tag.get_text(strip=True)
+        show_url = f"https://www.fossedata.co.uk{href}"
+        date_text = cells[1].get_text(strip=True)
+        venue = cells[2].get_text(strip=True)
+
         try:
-            show_date = datetime.datetime.strptime(date_str.strip(), "%d %B %Y").date()
+            show_date = datetime.datetime.strptime(date_text, "%d %B %Y").date()
         except ValueError:
-            continue  # Skip if date parsing fails
+            continue
 
-        show_type = "Unknown"
-        name_lower = name.lower()
+        # Determine show type from name
+        name_lower = show_name.lower()
         if "championship" in name_lower:
             show_type = "Championship"
         elif "premier" in name_lower:
             show_type = "Premier Open"
         elif "open" in name_lower:
             show_type = "Open"
+        else:
+            show_type = "Unknown"
 
-        # Skip if already processed
-        if show_id in existing_links:
+        if show_url in existing_links:
             continue
 
         show_info = {
-            "id": show_id,
-            "show_name": name.strip(),
+            "id": show_url,  # use full URL as unique ID now
+            "show_name": show_name,
             "date": show_date,
-            "venue": venue.strip(),
-            "type": show_type
+            "venue": venue,
+            "type": show_type,
+            "url": show_url
         }
         shows.append(show_info)
-        new_links.add(show_id)
+        new_links.add(show_url)
 
-    # Save back the updated links
     save_links(new_links)
-
     return shows
  
 async def download_schedule_for_show(context, show: dict) -> Optional[str]:
@@ -252,15 +258,18 @@ async def download_schedule_for_show(context, show: dict) -> Optional[str]:
     Download the schedule PDF for a given show via Playwright (with POST fallback).
     Returns the local PDF file path, or None if failed.
     """
-    show_id = show.get("id")
-    schedule_pdf_path = f"schedule_{show_id}.pdf" if show_id else "schedule_temp.pdf"
+    # Handle both legacy ID and new vanity URL
+    target_url = show.get("url") or show.get("id")
+    if not target_url:
+        return None
+
+    # Use a clean filename
+    safe_id = re.sub(r'[^\w\-]', '_', target_url.split('/')[-1])
+    schedule_pdf_path = f"schedule_{safe_id}.pdf"
 
     try:
         page = await context.new_page()
-        if show_id and show_id.isdigit():
-            await page.goto(f"https://www.fossedata.co.uk/show.asp?ShowID={show_id}", timeout=30000)
-        else:
-            await page.goto("https://www.fossedata.co.uk", timeout=20000)
+        await page.goto(target_url, timeout=30000)
 
         download_link_elem = await page.query_selector("a:text(\"Schedule\")")
         download_link = await download_link_elem.get_attribute("href") if download_link_elem else None
@@ -732,7 +741,8 @@ async def fetch_postal_close_date(show_id: str) -> Optional[datetime.date]:
             browser = await pw.chromium.launch()
             
             page = await context.new_page()
-            await page.goto(f"https://www.fossedata.co.uk/show.asp?ShowID={show_id}", timeout=30000)
+            target_url = show.get("url") or f"https://www.fossedata.co.uk/show.asp?ShowID={show_id}"
+						await page.goto(target_url, timeout=30000)
             html = await page.content()
             await context.storage_state(path=STORAGE_STATE_FILE)
             await browser.close()
