@@ -26,8 +26,9 @@ load_dotenv()
 
 def fetch_aspx_links() -> List[str]:
     """
-    Scrapes the FosseData shows page for links and saves them to 'aspx_links.txt'.
-    Returns a list of the show links.
+    Scrapes the FosseData shows page for all show URLs (old and new format)
+    and saves them to 'aspx_links.txt'.
+    Returns a list of full show URLs.
     """
     url = "https://www.fossedata.co.uk/shows.aspx"
     response = requests.get(url)
@@ -35,30 +36,18 @@ def fetch_aspx_links() -> List[str]:
 
     if response.status_code == 200:
         content = response.text
-        # Match the links to show pages
-        show_links = re.findall(r'href="(show\.asp\?ShowID=\d+)"', content)
-        show_links = [f"https://www.fossedata.co.uk/{link}" for link in show_links]
-        
-        # Save the new links to a file (aspx_links.txt)
+
+        # Match both legacy and pretty URLs
+        classic_links = re.findall(r'href="(/show\.asp\?ShowID=\d+)"', content)
+        pretty_links = re.findall(r'href="(/shows/[^"]+\.aspx)"', content)
+
+        all_links = classic_links + pretty_links
+        show_links = [f"https://www.fossedata.co.uk{link}" for link in all_links]
+
+        # Save to file
         save_links(show_links)
 
     return show_links
-    
-def save_links(links: List[str]):
-    """
-    Save the show links to 'aspx_links.txt'.
-    """
-    with open("aspx_links.txt", "w") as f:
-        for link in links:
-            f.write(f"{link}\n")
-            
-def read_existing_links() -> List[str]:
-    """Read show links from 'aspx_links.txt'."""
-    try:
-        with open("aspx_links.txt", "r") as f:
-            return [line.strip() for line in f.readlines() if line.strip()]
-    except FileNotFoundError:
-        return []
 
 # ===== Load Environment Variables Correctly =====
 DOG_NAME = os.getenv("DOG_NAME")
