@@ -195,35 +195,39 @@ def save_links(links: set):
 
 async def fetch_show_list(page) -> List[dict]:
     """
-    Scrapes FosseData shows.aspx for all show listings (legacy and modern).
-    Extracts name, date, venue, type, and full URL.
+    Scrapes updated FosseData shows.aspx for all show listings (modern format).
+    Extracts name, date, and full URL. Venue no longer available on this page.
     """
     await page.goto("https://www.fossedata.co.uk/shows.aspx", timeout=60000)
     html = await page.content()
-
     soup = BeautifulSoup(html, "html.parser")
-    table_rows = soup.select("table tbody tr")
 
     existing_links = set(read_existing_links())
     new_links = set(existing_links)
     shows = []
 
-    for row in table_rows:
-        link_tag = row.find("a", href=True)
-        cells = row.find_all("td")
-        if not link_tag or len(cells) < 3:
+    forms = soup.select("form[action^='/shows/']")
+    for form in forms:
+        action = form.get("action", "")
+        show_url = f"https://www.fossedata.co.uk{action}"
+        if show_url in existing_links:
             continue
 
-        href = link_tag["href"]
-        show_name = link_tag.get_text(strip=True)
-        show_url = f"https://www.fossedata.co.uk{href}"
-        date_text = cells[1].get_text(strip=True)
-        venue = cells[2].get_text(strip=True)
+        # Find the <h2> with the show name
+        name_elem = form.select_one("h2")
+        show_name = name_elem.get_text(strip=True) if name_elem else "Unknown Show"
 
-        try:
-            show_date = datetime.datetime.strptime(date_text, "%d %B %Y").date()
-        except ValueError:
-            continue
+        # Find the first <td> that looks like a date
+        td_elems = form.select("td")
+        show_date = None
+        for td in td_elems:
+            match = re.search(r"\b\d{1,2} \w+ 20\d{2}\b", td.text)
+            if match:
+                try:
+                    show_date = datetime.datetime.strptime(match.group(0), "%d %B %Y").date()
+                    break
+                except Exception:
+                    continue
 
         # Determine show type from name
         name_lower = show_name.lower()
@@ -236,17 +240,15 @@ async def fetch_show_list(page) -> List[dict]:
         else:
             show_type = "Unknown"
 
-        if show_url in existing_links:
-            continue
-
         show_info = {
-            "id": show_url,  # use full URL as unique ID now
+            "id": show_url,
             "show_name": show_name,
             "date": show_date,
-            "venue": venue,
+            "venue": "",  # Venue not available anymore
             "type": show_type,
             "url": show_url
         }
+
         shows.append(show_info)
         new_links.add(show_url)
 
