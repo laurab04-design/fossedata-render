@@ -119,7 +119,7 @@ STORAGE_STATE_FILE = "storage_state.json"
 RESULTS_CSV = "results.csv"
 RESULTS_JSON = "results.json"
 CLASH_OVERNIGHT_CSV = "clashes_overnight.csv"
-ASPX_LINKS = "aspx_links.txt")
+ASPX_LINKS = ("aspx_links.txt")
 
 travel_cache = {}
 
