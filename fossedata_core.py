@@ -104,7 +104,7 @@ if os.path.isfile(PROCESSED_SHOWS_FILE):
         {}
 
 def read_existing_links() -> List[str]:
-    """Read show URLs from aspx_links.txt if present."""
+    #Read show URLs from aspx_links.txt if present
     try:
         with open("aspx_links.txt", "r") as f:
             return [line.strip() for line in f if line.strip()]
@@ -112,7 +112,7 @@ def read_existing_links() -> List[str]:
         return []
         
 def save_links(links: set):
-    """Save show URLs to aspx_links.txt."""
+    #Save show URLs to aspx_links.txt
     if not links:
         print("[WARNING] save_links() called with empty set.")
         return
@@ -122,72 +122,80 @@ def save_links(links: set):
     print(f"[INFO] Wrote {len(links)} links to aspx_links.txt")
     
 async def fetch_show_list(page) -> List[dict]:
-    """
-    Scrapes FosseData shows/Shows-To-Enter.aspx for all show listings.
-    Extracts name, date, venue, type, and full URL. Handles new .aspx link format.
-    """
+    
+    #Scrape the FosseData 'Shows to Enter' page for all .aspx links and show details.
     await page.goto("https://fossedata.co.uk/shows/Shows-To-Enter.aspx", timeout=60000)
     html = await page.content()
     soup = BeautifulSoup(html, "html.parser")
-    table_rows = soup.select("table tbody tr")
-
+    
+    rows = soup.select("tr.tableRow, tr.alternateRow, tr.tableRow.redBg, tr.alternateRow.redBg")
     existing_links = set(read_existing_links())
     new_links = set(existing_links)
     shows = []
 
-    for row in table_rows:
-        link_tag = row.find("a", href=True)
-        cells = row.find_all("td")
-        if not link_tag or len(cells) < 3:
-            continue
-
-        href = link_tag["href"]
-        if not href.lower().endswith(".aspx"):
-            continue  # Skip non-aspx links
-
-        show_name = link_tag.get_text(strip=True)
-        show_url = f"https://www.fossedata.co.uk/shows/{href}"
-        date_text = cells[1].get_text(strip=True)
-        venue = cells[2].get_text(strip=True)
-
+    for row in rows:
         try:
-            show_date = datetime.datetime.strptime(date_text, "%d %B %Y").date()
-        except ValueError:
+            show_name_div = row.find("div", class_="showName")
+            date_td = row.find_all("td")[1]
+            link_tag = row.find("a", string="Details")
+            
+            if not show_name_div or not date_td or not link_tag:
+                continue
+
+            show_name = show_name_div.get_text(strip=True)
+            show_url = f"https://www.fossedata.co.uk/shows{link_tag['href']}"
+            date_text = date_td.get_text(strip=True)
+
+            # Handle date range
+            if " - " in date_text:
+                start_date_str = date_text.split(" - ")[0]
+            else:
+                start_date_str = date_text
+
+            try:
+                show_date = datetime.datetime.strptime(start_date_str.strip(), "%d %b %Y").date()
+            except ValueError:
+                try:
+                    show_date = datetime.datetime.strptime(start_date_str.strip(), "%d %B %Y").date()
+                except ValueError:
+                    continue
+
+            if show_url in existing_links:
+                continue
+
+            name_lower = show_name.lower()
+            if "championship" in name_lower:
+                show_type = "Championship"
+            elif "premier" in name_lower:
+                show_type = "Premier Open"
+            elif "open" in name_lower:
+                show_type = "Open"
+            else:
+                show_type = "Unknown"
+
+            show_info = {
+                "id": show_url,
+                "show_name": show_name,
+                "date": show_date,
+                "venue": "",  # Venue not available on listing page
+                "type": show_type,
+                "url": show_url
+            }
+
+            shows.append(show_info)
+            new_links.add(show_url)
+
+        except Exception as e:
+            print(f"[WARN] Skipped one row due to error: {e}")
             continue
-
-        if show_url in existing_links:
-            continue  # Already recorded
-
-        name_lower = show_name.lower()
-        if "championship" in name_lower:
-            show_type = "Championship"
-        elif "premier" in name_lower:
-            show_type = "Premier Open"
-        elif "open" in name_lower:
-            show_type = "Open"
-        else:
-            show_type = "Unknown"
-
-        show_info = {
-            "id": show_url,  # still using URL as ID
-            "show_name": show_name,
-            "date": show_date,
-            "venue": venue,
-            "type": show_type,
-            "url": show_url
-        }
-
-        shows.append(show_info)
-        new_links.add(show_url)
 
     save_links(new_links)
+    print(f"[INFO] Collected {len(shows)} new shows")
     return shows
  
 async def download_schedule_for_show(context, show: dict) -> Optional[str]:
-    """
-    Download the schedule PDF for a given show via Playwright (with POST fallback).
-    Returns the local PDF file path, or None if failed.
-    """
+    #Download the schedule PDF for a given show via Playwright (with POST fallback).
+    #Returns the local PDF file path, or None if failed.
     show_url = show.get("url")
     if not show_url:
         return None
@@ -233,10 +241,8 @@ async def download_schedule_for_show(context, show: dict) -> Optional[str]:
         await page.close()
     
 def parse_pdf_for_info(pdf_path: str) -> Optional[dict]:
-    """
-    Extract relevant information from the schedule PDF.
-    Includes entry fees, catalogue prices, judges, and whether eligible classes are present.
-    """
+    #Extract relevant information from the schedule PDF.
+    #Includes entry fees, catalogue prices, judges, and whether eligible classes are present.
     text = ""
     try:
         import fitz  # PyMuPDF
@@ -278,7 +284,7 @@ def parse_pdf_for_info(pdf_path: str) -> Optional[dict]:
     return info
 
 def extract_fee(pattern: str, text: str) -> Optional[float]:
-    """Extract a fee amount using the given regex pattern."""
+    #Extract a fee amount using the given regex pattern
     match = re.search(pattern, text, flags=re.IGNORECASE)
     if match:
         try:
@@ -288,7 +294,7 @@ def extract_fee(pattern: str, text: str) -> Optional[float]:
     return None
 
 def extract_judges(text: str) -> Tuple[Optional[str], Optional[str]]:
-    """Extract judges for Dogs and Bitches from schedule text."""
+    #Extract judges for Dogs and Bitches from schedule text
     judge_dogs = judge_bitches = None
     judge_section_match = re.search(r"Golden Retriever[^\n]*Dogs?:\s*([^\n]+)", text)
     if judge_section_match:
@@ -311,7 +317,7 @@ def extract_judges(text: str) -> Tuple[Optional[str], Optional[str]]:
     return judge_dogs, judge_bitches
     
 def save_results(results, processed_shows):
-    """Save results and caches to local files."""
+    #Save results and caches to local files
     # Sort results by date
     for r in results:
         if r.get('date'):
@@ -343,7 +349,7 @@ def save_results(results, processed_shows):
         print(f"Warning: Could not save {PROCESSED_SHOWS_FILE}: {e}")
 
 def upload_to_google_drive():
-    """Upload output and cache files to Google Drive using the already-initialised service account."""
+    #Upload output and cache files to Google Drive using the already-initialised service account
     if not drive_service:
         print("[ERROR] Google Drive client not initialised.")
         return
@@ -352,7 +358,7 @@ def upload_to_google_drive():
         return
 
     def upload_file(file_path, mime_type):
-        """Uploads a file to Google Drive in the specified folder."""
+        #Uploads a file to Google Drive in the specified folder
         name = os.path.basename(file_path)
         media = MediaFileUpload(file_path, mimetype=mime_type, resumable=False)
 
@@ -386,55 +392,34 @@ def upload_to_google_drive():
     except Exception as e:
         print(f"[ERROR] Google Drive upload failed: {e}")
         
-async def fetch_postal_close_date(show_url: str) -> Optional[datetime.date]:
-    """
-    Scrape the postal close date for a show from its main aspx page.
-    Returns a date object if found, else None.
-    """
-    try:
-        async with async_playwright() as pw:
-            browser = await pw.chromium.launch()
-            context = await browser.new_context(storage_state=STORAGE_STATE_FILE if os.path.exists(STORAGE_STATE_FILE) else None)
-            page = await context.new_page()
-            await page.goto(show_url, timeout=30000)
-            html = await page.content()
-            await context.storage_state(path=STORAGE_STATE_FILE)
-            await browser.close()
-
-        return parse_postal_close_date_from_html(html)
-
-    except Exception as e:
-        print(f"Warning: Failed to fetch postal close date for show {show_url}: {e}")
-        return None
-    
 def parse_postal_close_date_from_html(html: str) -> Optional[datetime.date]:
-    """Extract postal close date from show page HTML."""
+    # Extract postal or online close date from a modern FosseData show page.
+    # Looks for keywords in TDs and parses the following sibling's text as a date.
     soup = BeautifulSoup(html, "html.parser")
-    rows = soup.select("table tbody tr")
+    td_elements = soup.find_all("td")
+    
     postal_date = None
     online_date = None
-    
-    for row in rows:
-        cells = row.find_all("td")
-        if len(cells) != 2:
+
+    for i, td in enumerate(td_elements[:-1]):  # Stop before last to avoid index error
+        label = td.get_text(strip=True).lower()
+        next_text = td_elements[i + 1].get_text(strip=True)
+        
+        match = re.search(r"\d{1,2} \w+ 20\d{2}", next_text)
+        if not match:
             continue
-        label = cells[0].get_text(strip=True).lower()
-        date_text = cells[1].get_text(strip=True)
-        date_match = re.search(r"(\d{1,2} \w+ 20\d{2})", date_text)
 
-        if date_match:
-            parsed_date = None
-            try:
-                parsed_date = datetime.datetime.strptime(date_match.group(1), "%d %B %Y").date()
-            except ValueError:
-                continue
+        try:
+            parsed_date = datetime.datetime.strptime(match.group(), "%d %B %Y").date()
+        except ValueError:
+            continue
 
-            if "postal entries close" in label:
-                postal_date = parsed_date
-            elif "online entries close" in label:
-                online_date = parsed_date
+        if "postal entries close" in label:
+            postal_date = parsed_date
+        elif "online entries close" in label:
+            online_date = parsed_date
 
-    # Use postal if available, else fallback to online
+    # Prefer postal if found, otherwise fall back to online
     if postal_date:
         return postal_date
     elif online_date:
@@ -445,9 +430,7 @@ def parse_postal_close_date_from_html(html: str) -> Optional[datetime.date]:
         
 async def main_processing_loop(show_list: list):
     global processed_shows
-    """
-    Main loop to process shows, check eligibility, calculate costs, JW points, etc.
-    """
+    #Main loop to process shows, check eligibility, calculate costs, JW points, etc.
     results = []
 
     for show in show_list:
@@ -508,10 +491,9 @@ async def main_processing_loop(show_list: list):
     
 
 def extract_text_from_pdf(file_obj) -> str:
-    """
-    Extract text from a PDF file object.
-    Tries PyMuPDF first, falls back to pdfplumber.
-    """
+    #Extract text from a PDF file object.
+    #Tries PyMuPDF first, falls back to pdfplumber.
+    
     text = ""
     try:
         import fitz  # PyMuPDF
