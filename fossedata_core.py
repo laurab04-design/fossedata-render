@@ -192,12 +192,9 @@ async def fetch_show_list(page) -> List[dict]:
     save_links(new_links)
     print(f"[INFO] Collected {len(shows)} new shows")
     return shows
- 
-import requests
-from bs4 import BeautifulSoup
 
-def download_schedule_for_show(show: dict) -> Optional[str]:
-    #Download the schedule PDF using a manual form POST instead of Playwright
+async def download_schedule_for_show(context, show: dict) -> Optional[str]:
+    # Download the schedule PDF for a given show using Playwright
     show_url = show.get("url")
     if not show_url:
         return None
@@ -205,52 +202,29 @@ def download_schedule_for_show(show: dict) -> Optional[str]:
     safe_id = re.sub(r'[^\w\-]', '_', show_url.split('/')[-1])
     schedule_pdf_path = f"schedule_{safe_id}.pdf"
 
+    page = await context.new_page()
     try:
-        session = requests.Session()
-        headers = {
-            "User-Agent": "Mozilla/5.0",
-            "Referer": show_url
-        }
+        await page.goto(show_url, timeout=30000)
 
-        # Step 1: GET the show page
-        response = session.get(show_url, headers=headers, timeout=30)
-        if response.status_code != 200:
-            print(f"[ERROR] Failed to load show page {show_url} (status {response.status_code})")
+        # Wait for the download to be triggered by button click
+        download_task = page.wait_for_event("download")
+        await page.click("input#ctl00_ContentPlaceHolder_btnDownloadSchedule")
+        download = await download_task
+
+        suggested_name = download.suggested_filename
+        if not suggested_name.lower().endswith(".pdf"):
+            print(f"[ERROR] Downloaded file does not appear to be a PDF: {suggested_name}")
             return None
 
-        soup = BeautifulSoup(response.text, "html.parser")
-
-        # Step 2: Extract ASP.NET state fields
-        viewstate = soup.find("input", {"name": "__VIEWSTATE"})
-        eventvalidation = soup.find("input", {"name": "__EVENTVALIDATION"})
-        viewstategenerator = soup.find("input", {"name": "__VIEWSTATEGENERATOR"})
-
-        if not viewstate or not eventvalidation:
-            print(f"[ERROR] Could not find VIEWSTATE or EVENTVALIDATION on page {show_url}")
-            return None
-
-        form_data = {
-            "__VIEWSTATE": viewstate["value"],
-            "__EVENTVALIDATION": eventvalidation["value"],
-            "__VIEWSTATEGENERATOR": viewstategenerator["value"] if viewstategenerator else "",
-            "ctl00$ContentPlaceHolder$btnDownloadSchedule": "Schedule"
-        }
-
-        # Step 3: POST back to download the PDF
-        post_response = session.post(show_url, data=form_data, headers=headers, timeout=30)
-        if "PDF" not in post_response.headers.get("Content-Type", ""):
-            print(f"[ERROR] Unexpected content when downloading schedule for {show_url}")
-            return None
-
-        with open(schedule_pdf_path, "wb") as f:
-            f.write(post_response.content)
-
-        print(f"[INFO] Downloaded schedule for {show_url}")
+        await download.save_as(schedule_pdf_path)
+        print(f"[INFO] Successfully downloaded: {schedule_pdf_path}")
         return schedule_pdf_path
 
     except Exception as e:
-        print(f"[ERROR] Exception downloading schedule from {show_url}: {e}")
+        print(f"[ERROR] Failed to download schedule from {show_url}: {e}")
         return None
+    finally:
+        await page.close()
     
 def parse_pdf_for_info(pdf_path: str) -> Optional[dict]:
     #Extract relevant information from the schedule PDF.
@@ -397,6 +371,8 @@ def upload_to_google_drive():
         upload_file(RESULTS_JSON, "application/json")
         upload_file(RESULTS_CSV, "text/csv")
         upload_file(PROCESSED_SHOWS_FILE, "application/json")
+        for pdf_file in Path(".").glob("schedule_*.pdf"):
+            upload_file(str(pdf_file), "application/pdf")
         upload_file(ASPX_LINKS, "text/plain")
         if os.path.exists(STORAGE_STATE_FILE):
             upload_file(STORAGE_STATE_FILE, "application/json")
@@ -478,7 +454,7 @@ async def main_processing_loop(show_list: list):
             async with async_playwright() as pw:
                 browser = await pw.chromium.launch()
                 context = await browser.new_context(storage_state=STORAGE_STATE_FILE if os.path.exists(STORAGE_STATE_FILE) else None)
-                pdf_path = await asyncio.to_thread(download_schedule_for_show, show)
+                pdf_path = await download_schedule_for_show(context, show)
                 await context.storage_state(path=STORAGE_STATE_FILE)
                 await browser.close()
                 return pdf_path
