@@ -193,8 +193,11 @@ async def fetch_show_list(page) -> List[dict]:
     print(f"[INFO] Collected {len(shows)} new shows")
     return shows
  
-async def download_schedule_for_show(context, show: dict) -> Optional[str]:
-    # Download the schedule PDF for a given show via Playwright
+import requests
+from bs4 import BeautifulSoup
+
+def download_schedule_for_show(show: dict) -> Optional[str]:
+    #Download the schedule PDF using a manual form POST instead of Playwright
     show_url = show.get("url")
     if not show_url:
         return None
@@ -202,28 +205,52 @@ async def download_schedule_for_show(context, show: dict) -> Optional[str]:
     safe_id = re.sub(r'[^\w\-]', '_', show_url.split('/')[-1])
     schedule_pdf_path = f"schedule_{safe_id}.pdf"
 
-    page = await context.new_page()
     try:
-        await page.goto(show_url, timeout=30000)
+        session = requests.Session()
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Referer": show_url
+        }
 
-        # Look for the orange input button that says "Schedule"
-        download_button = await page.query_selector("input#ctl00_ContentPlaceHolder_btnDownloadSchedule")
-        if download_button:
-            download_task = page.wait_for_event("download")
-            await download_button.click()
-            download = await download_task
-            await download.save_as(schedule_pdf_path)
-            return schedule_pdf_path
-        else:
-            print(f"[WARN] No Schedule button found on {show_url}")
+        # Step 1: GET the show page
+        response = session.get(show_url, headers=headers, timeout=30)
+        if response.status_code != 200:
+            print(f"[ERROR] Failed to load show page {show_url} (status {response.status_code})")
             return None
 
-    except Exception as e:
-        print(f"[ERROR] Failed to download schedule for {show_url}: {e}")
-        return None
+        soup = BeautifulSoup(response.text, "html.parser")
 
-    finally:
-        await page.close()
+        # Step 2: Extract ASP.NET state fields
+        viewstate = soup.find("input", {"name": "__VIEWSTATE"})
+        eventvalidation = soup.find("input", {"name": "__EVENTVALIDATION"})
+        viewstategenerator = soup.find("input", {"name": "__VIEWSTATEGENERATOR"})
+
+        if not viewstate or not eventvalidation:
+            print(f"[ERROR] Could not find VIEWSTATE or EVENTVALIDATION on page {show_url}")
+            return None
+
+        form_data = {
+            "__VIEWSTATE": viewstate["value"],
+            "__EVENTVALIDATION": eventvalidation["value"],
+            "__VIEWSTATEGENERATOR": viewstategenerator["value"] if viewstategenerator else "",
+            "ctl00$ContentPlaceHolder$btnDownloadSchedule": "Schedule"
+        }
+
+        # Step 3: POST back to download the PDF
+        post_response = session.post(show_url, data=form_data, headers=headers, timeout=30)
+        if "PDF" not in post_response.headers.get("Content-Type", ""):
+            print(f"[ERROR] Unexpected content when downloading schedule for {show_url}")
+            return None
+
+        with open(schedule_pdf_path, "wb") as f:
+            f.write(post_response.content)
+
+        print(f"[INFO] Downloaded schedule for {show_url}")
+        return schedule_pdf_path
+
+    except Exception as e:
+        print(f"[ERROR] Exception downloading schedule from {show_url}: {e}")
+        return None
     
 def parse_pdf_for_info(pdf_path: str) -> Optional[dict]:
     #Extract relevant information from the schedule PDF.
@@ -451,7 +478,7 @@ async def main_processing_loop(show_list: list):
             async with async_playwright() as pw:
                 browser = await pw.chromium.launch()
                 context = await browser.new_context(storage_state=STORAGE_STATE_FILE if os.path.exists(STORAGE_STATE_FILE) else None)
-                pdf_path = await download_schedule_for_show(context, show)
+                pdf_path = download_schedule_for_show(show)
                 await context.storage_state(path=STORAGE_STATE_FILE)
                 await browser.close()
                 return pdf_path
