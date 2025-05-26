@@ -392,6 +392,25 @@ def upload_to_google_drive():
     except Exception as e:
         print(f"[ERROR] Google Drive upload failed: {e}")
         
+async def fetch_postal_close_date(show_url: str) -> Optional[datetime.date]:
+    #Scrape the postal close date for a show from its main aspx page.
+    #Returns a date object if found, else None.
+    try:
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch()
+            context = await browser.new_context(storage_state=STORAGE_STATE_FILE if os.path.exists(STORAGE_STATE_FILE) else None)
+            page = await context.new_page()
+            await page.goto(show_url, timeout=30000)
+            html = await page.content()
+            await context.storage_state(path=STORAGE_STATE_FILE)
+            await browser.close()
+
+        return parse_postal_close_date_from_html(html)
+
+    except Exception as e:
+        print(f"Warning: Failed to fetch postal close date for show {show_url}: {e}")
+        return None
+        
 def parse_postal_close_date_from_html(html: str) -> Optional[datetime.date]:
     # Extract postal or online close date from a modern FosseData show page.
     # Looks for keywords in TDs and parses the following sibling's text as a date.
@@ -426,25 +445,6 @@ def parse_postal_close_date_from_html(html: str) -> Optional[datetime.date]:
         print("[INFO] Postal close date missing, using online close date instead.")
         return online_date
     else:
-        return None
-
-async def fetch_postal_close_date(show_url: str) -> Optional[datetime.date]:
-    #Fetch the postal close date for a show from its main aspx page.
-    #Returns a date object if found, else None.
-    try:
-        async with async_playwright() as pw:
-            browser = await pw.chromium.launch()
-            context = await browser.new_context(storage_state=STORAGE_STATE_FILE if os.path.exists(STORAGE_STATE_FILE) else None)
-            page = await context.new_page()
-            await page.goto(show_url, timeout=30000)
-            html = await page.content()
-            await context.storage_state(path=STORAGE_STATE_FILE)
-            await browser.close()
-
-        return parse_postal_close_date_from_html(html)
-
-    except Exception as e:
-        print(f"Warning: Failed to fetch postal close date for show {show_url}: {e}")
         return None
         
 async def main_processing_loop(show_list: list):
