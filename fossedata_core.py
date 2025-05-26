@@ -194,8 +194,7 @@ async def fetch_show_list(page) -> List[dict]:
     return shows
  
 async def download_schedule_for_show(context, show: dict) -> Optional[str]:
-    #Download the schedule PDF for a given show via Playwright (with POST fallback).
-    #Returns the local PDF file path, or None if failed.
+    # Download the schedule PDF for a given show via Playwright
     show_url = show.get("url")
     if not show_url:
         return None
@@ -207,31 +206,17 @@ async def download_schedule_for_show(context, show: dict) -> Optional[str]:
     try:
         await page.goto(show_url, timeout=30000)
 
-        download_link_elem = await page.query_selector("a:text(\"Schedule\")")
-        download_link = await download_link_elem.get_attribute("href") if download_link_elem else None
-
-        if download_link:
+        # Look for the orange input button that says "Schedule"
+        download_button = await page.query_selector("input#ctl00_ContentPlaceHolder_btnDownloadSchedule")
+        if download_button:
             download_task = page.wait_for_event("download")
-            await page.goto(download_link)
+            await download_button.click()
             download = await download_task
             await download.save_as(schedule_pdf_path)
+            return schedule_pdf_path
         else:
-            try:
-                download_task = page.wait_for_event("download")
-                download_button = await page.query_selector("text=Download Schedule")
-                if download_button:
-                    await download_button.click()
-                else:
-                    fallback_link = await page.query_selector("a[href*='Schedule']")
-                    if fallback_link:
-                        await fallback_link.click()
-                download = await download_task
-                await download.save_as(schedule_pdf_path)
-            except Exception as e:
-                print(f"[ERROR] Fallback download failed for {show_url}: {e}")
-                return None
-
-        return schedule_pdf_path
+            print(f"[WARN] No Schedule button found on {show_url}")
+            return None
 
     except Exception as e:
         print(f"[ERROR] Failed to download schedule for {show_url}: {e}")
