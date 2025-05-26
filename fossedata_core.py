@@ -533,7 +533,7 @@ def extract_text_from_pdf(file_obj) -> str:
 
 # Modify full_run to await main_processing_loop
 async def full_run():
-    """Fetch shows, process them, save & upload."""
+    
     # 1) fetch the list of shows
     async def _get_shows():
         async with async_playwright() as pw:
