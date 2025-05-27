@@ -11,6 +11,7 @@ import datetime
 import pdfplumber
 import asyncio
 import PyPDF2
+import httpx
 from pathlib import Path
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
@@ -192,8 +193,6 @@ async def fetch_show_list(page) -> List[dict]:
     save_links(new_links)
     print(f"[INFO] Collected {len(shows)} new shows")
     return shows
-
-import httpx
 
 async def download_schedule_for_show(context, show: dict) -> Optional[str]:
     show_url = show.get("url")
