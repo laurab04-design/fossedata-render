@@ -196,6 +196,7 @@ async def fetch_show_list(page) -> List[dict]:
 async def download_schedule_for_show(context, show: dict) -> Optional[str]:
     show_url = show.get("url")
     if not show_url:
+        print("[ERROR] No URL provided.")
         return None
 
     safe_id = re.sub(r"[^\w\-]", "_", show_url.split("/")[-1])
@@ -203,20 +204,27 @@ async def download_schedule_for_show(context, show: dict) -> Optional[str]:
 
     page = await context.new_page()
     try:
+        print(f"[INFO] Visiting {show_url}")
         await page.goto(show_url, timeout=30000)
 
-        # Wait for download triggered by the orange 'Schedule' button
-        async with page.expect_download() as download_info:
+        # Wait up to 10 seconds for the download to trigger
+        async with page.expect_download(timeout=10000) as download_info:
             await page.click("input#ctl00_ContentPlaceHolder_btnDownloadSchedule")
-
         download = await download_info.value
+
+        # Show file name (temp) before saving
+        print(f"[INFO] Download started: suggested filename = {download.suggested_filename}")
         await download.save_as(schedule_pdf_path)
 
-        print(f"[INFO] Downloaded: {schedule_pdf_path}")
+        if not os.path.isfile(schedule_pdf_path) or os.path.getsize(schedule_pdf_path) < 1000:
+            print(f"[ERROR] File saved but suspiciously small or missing: {schedule_pdf_path}")
+            return None
+
+        print(f"[INFO] Downloaded and saved: {schedule_pdf_path}")
         return schedule_pdf_path
 
     except Exception as e:
-        print(f"[ERROR] Failed to download schedule for {show_url}: {e}")
+        print(f"[ERROR] Failed to download schedule from {show_url}: {e}")
         return None
     finally:
         await page.close()
