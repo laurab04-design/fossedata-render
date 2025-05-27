@@ -11,7 +11,6 @@ import datetime
 import pdfplumber
 import asyncio
 import PyPDF2
-import httpx
 from pathlib import Path
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
@@ -206,25 +205,24 @@ async def download_schedule_for_show(context, show: dict) -> Optional[str]:
     try:
         await page.goto(show_url, timeout=30000)
 
-        # Intercept PDF response
-        async with page.expect_response(lambda r: "Schedule.pdf" in r.url and r.status == 200) as response_info:
+        # Intercept the PDF download triggered by clicking the Schedule button
+        async with page.expect_response(lambda r: r.request.method == "GET" and "Schedule" in r.url and r.status == 200) as resp_info:
             await page.click("input#ctl00_ContentPlaceHolder_btnDownloadSchedule")
-        
-        response = await response_info.value
-        body = await response.body()
 
-        if not body or not response.headers.get("content-type", "").lower().startswith("application/pdf"):
-            print(f"[ERROR] Did not receive a valid PDF response for {show_url}")
+        response = await resp_info.value
+        if "application/pdf" not in response.headers.get("content-type", "").lower():
+            print(f"[ERROR] Unexpected content type for {show_url}: {response.headers.get('content-type')}")
             return None
 
+        pdf_data = await response.body()
         with open(schedule_pdf_path, "wb") as f:
-            f.write(body)
+            f.write(pdf_data)
 
-        print(f"[INFO] Downloaded {schedule_pdf_path}")
+        print(f"[INFO] Downloaded: {schedule_pdf_path}")
         return schedule_pdf_path
 
     except Exception as e:
-        print(f"[ERROR] Intercepting schedule PDF failed for {show_url}: {e}")
+        print(f"[ERROR] Failed to download schedule for {show_url}: {e}")
         return None
     finally:
         await page.close()
@@ -440,7 +438,6 @@ def parse_postal_close_date_from_html(html: str) -> Optional[datetime.date]:
         
 async def main_processing_loop(show_list: list):
     global processed_shows
-    #Main loop to process shows, check eligibility, calculate costs, JW points, etc.
     results = []
 
     for show in show_list:
@@ -449,50 +446,51 @@ async def main_processing_loop(show_list: list):
             continue
 
         print(f"Processing show: {show.get('show_name')} on {show.get('date')}")
-        
+
+        # === Fetch postal close date ===
         postal_close_date = await fetch_postal_close_date(show_url)
 
-        # ===== Schedule Download =====
+        # === Download schedule using Playwright PDF interception ===
         async with async_playwright() as pw:
             browser = await pw.chromium.launch()
-            context = await browser.new_context(storage_state=STORAGE_STATE_FILE if os.path.exists(STORAGE_STATE_FILE) else None)
+            context = await browser.new_context(
+                storage_state=STORAGE_STATE_FILE if os.path.exists(STORAGE_STATE_FILE) else None
+            )
             pdf_path = await download_schedule_for_show(context, show)
             await context.storage_state(path=STORAGE_STATE_FILE)
             await browser.close()
-            
+
         if not pdf_path:
             print(f"Skipping {show.get('show_name')} (no schedule PDF)")
             continue
 
+        # === Parse the PDF for Golden info ===
         info = parse_pdf_for_info(pdf_path)
         if not info:
             print(f"Skipping {show.get('show_name')} (Golden Retriever not mentioned)")
             continue
 
-        # ===== Build Result Row =====
         result = {
             "show_url": show_url,
             "show_name": show.get("show_name"),
             "show_date": show.get("date").isoformat() if isinstance(show.get("date"), datetime.date) else show.get("date"),
-            "type": show["type"],
+            "type": show.get("type"),
             "judge_dogs": info.get("judge_dogs"),
             "judge_bitches": info.get("judge_bitches"),
             "venue": show.get("venue"),
             "first_entry_fee": info.get("first_entry_fee"),
             "subsequent_entry_fee": info.get("subsequent_entry_fee"),
             "catalogue_fee": info.get("catalogue_price"),
+            "entry_close": postal_close_date.isoformat() if postal_close_date else None,
         }
 
         results.append(result)
         processed_shows.add(show_url)
 
-        # Periodic save
         if len(results) % 5 == 0:
             save_results(results, processed_shows)
 
-    # ===== Upload to Drive =====
     upload_to_google_drive()
-
     print("Processing loop complete.")
     return results
     
@@ -520,24 +518,20 @@ def extract_text_from_pdf(file_obj) -> str:
             print(f"Failed to extract text from PDF: {e}")
     return text
 
-# Modify full_run to await main_processing_loop
 async def full_run():
-    
-    # 1) fetch the list of shows
-    async def _get_shows():
-        async with async_playwright() as pw:
-            browser = await pw.chromium.launch()
-            page = await browser.new_page()
-            shows = await fetch_show_list(page)  # Fetch show links and details
-            await browser.close()
-            return shows
+    # Fetch the list of shows
+    async with async_playwright() as pw:
+        browser = await pw.chromium.launch()
+        page = await browser.new_page()
+        show_list = await fetch_show_list(page)
+        await browser.close()
 
-    show_list = await _get_shows()  # Fetch the list of shows
+    # Process each show
+    results = await main_processing_loop(show_list)
 
-    # 2) process each show
-    results = await main_processing_loop(show_list)  # Await async function to process shows
+    # Save results after all processing
     save_results(results, processed_shows)
-    return results  # Return processed results
+    return results
 
 
 if __name__ == "__main__":
