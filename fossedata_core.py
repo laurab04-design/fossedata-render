@@ -205,18 +205,18 @@ async def download_schedule_for_show(context, show: dict) -> Optional[str]:
     try:
         await page.goto(show_url, timeout=30000)
 
-        # Click and intercept actual download event
-        print(f"[INFO] Triggering download for {show_url}")
+        # Wait for download triggered by the orange 'Schedule' button
         async with page.expect_download() as download_info:
             await page.click("input#ctl00_ContentPlaceHolder_btnDownloadSchedule")
 
         download = await download_info.value
         await download.save_as(schedule_pdf_path)
-        print(f"[INFO] Saved schedule to: {schedule_pdf_path}")
+
+        print(f"[INFO] Downloaded: {schedule_pdf_path}")
         return schedule_pdf_path
 
     except Exception as e:
-        print(f"[ERROR] Download failed for {show_url}: {e}")
+        print(f"[ERROR] Failed to download schedule for {show_url}: {e}")
         return None
     finally:
         await page.close()
