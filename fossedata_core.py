@@ -206,36 +206,25 @@ async def download_schedule_for_show(context, show: dict) -> Optional[str]:
     try:
         await page.goto(show_url, timeout=30000)
 
-        # Extract state fields
-        viewstate = await page.get_attribute("input[name='__VIEWSTATE']", "value")
-        eventvalidation = await page.get_attribute("input[name='__EVENTVALIDATION']", "value")
-        generator = await page.get_attribute("input[name='__VIEWSTATEGENERATOR']", "value")
+        # Intercept PDF response
+        async with page.expect_response(lambda r: "Schedule.pdf" in r.url and r.status == 200) as response_info:
+            await page.click("input#ctl00_ContentPlaceHolder_btnDownloadSchedule")
+        
+        response = await response_info.value
+        body = await response.body()
 
-        form_data = {
-            "__VIEWSTATE": viewstate,
-            "__EVENTVALIDATION": eventvalidation,
-            "__VIEWSTATEGENERATOR": generator or "",
-            "ctl00$ContentPlaceHolder$btnDownloadSchedule": "Schedule"
-        }
+        if not body or not response.headers.get("content-type", "").lower().startswith("application/pdf"):
+            print(f"[ERROR] Did not receive a valid PDF response for {show_url}")
+            return None
 
-        headers = {
-            "User-Agent": "Mozilla/5.0",
-            "Referer": show_url
-        }
+        with open(schedule_pdf_path, "wb") as f:
+            f.write(body)
 
-        async with httpx.AsyncClient(follow_redirects=True) as client:
-            resp = await client.post(show_url, data=form_data, headers=headers)
-            if "application/pdf" in resp.headers.get("content-type", "").lower():
-                with open(schedule_pdf_path, "wb") as f:
-                    f.write(resp.content)
-                print(f"[INFO] Successfully downloaded: {schedule_pdf_path}")
-                return schedule_pdf_path
-            else:
-                print(f"[ERROR] Unexpected content type: {resp.headers.get('content-type')}")
-                return None
+        print(f"[INFO] Downloaded {schedule_pdf_path}")
+        return schedule_pdf_path
 
     except Exception as e:
-        print(f"[ERROR] Failed hybrid download for {show_url}: {e}")
+        print(f"[ERROR] Intercepting schedule PDF failed for {show_url}: {e}")
         return None
     finally:
         await page.close()
