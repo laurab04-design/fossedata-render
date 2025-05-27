@@ -193,35 +193,50 @@ async def fetch_show_list(page) -> List[dict]:
     print(f"[INFO] Collected {len(shows)} new shows")
     return shows
 
+import httpx
+
 async def download_schedule_for_show(context, show: dict) -> Optional[str]:
-    # Download the schedule PDF for a given show using Playwright
     show_url = show.get("url")
     if not show_url:
         return None
 
-    safe_id = re.sub(r'[^\w\-]', '_', show_url.split('/')[-1])
+    safe_id = re.sub(r"[^\w\-]", "_", show_url.split("/")[-1])
     schedule_pdf_path = f"schedule_{safe_id}.pdf"
 
     page = await context.new_page()
     try:
         await page.goto(show_url, timeout=30000)
 
-        # Wait for the download to be triggered by button click
-        download_task = page.wait_for_event("download")
-        await page.click("input#ctl00_ContentPlaceHolder_btnDownloadSchedule")
-        download = await download_task
+        # Extract state fields
+        viewstate = await page.get_attribute("input[name='__VIEWSTATE']", "value")
+        eventvalidation = await page.get_attribute("input[name='__EVENTVALIDATION']", "value")
+        generator = await page.get_attribute("input[name='__VIEWSTATEGENERATOR']", "value")
 
-        suggested_name = download.suggested_filename
-        if not suggested_name.lower().endswith(".pdf"):
-            print(f"[ERROR] Downloaded file does not appear to be a PDF: {suggested_name}")
-            return None
+        form_data = {
+            "__VIEWSTATE": viewstate,
+            "__EVENTVALIDATION": eventvalidation,
+            "__VIEWSTATEGENERATOR": generator or "",
+            "ctl00$ContentPlaceHolder$btnDownloadSchedule": "Schedule"
+        }
 
-        await download.save_as(schedule_pdf_path)
-        print(f"[INFO] Successfully downloaded: {schedule_pdf_path}")
-        return schedule_pdf_path
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Referer": show_url
+        }
+
+        async with httpx.AsyncClient(follow_redirects=True) as client:
+            resp = await client.post(show_url, data=form_data, headers=headers)
+            if "application/pdf" in resp.headers.get("content-type", "").lower():
+                with open(schedule_pdf_path, "wb") as f:
+                    f.write(resp.content)
+                print(f"[INFO] Successfully downloaded: {schedule_pdf_path}")
+                return schedule_pdf_path
+            else:
+                print(f"[ERROR] Unexpected content type: {resp.headers.get('content-type')}")
+                return None
 
     except Exception as e:
-        print(f"[ERROR] Failed to download schedule from {show_url}: {e}")
+        print(f"[ERROR] Failed hybrid download for {show_url}: {e}")
         return None
     finally:
         await page.close()
@@ -450,16 +465,13 @@ async def main_processing_loop(show_list: list):
         postal_close_date = await fetch_postal_close_date(show_url)
 
         # ===== Schedule Download =====
-        async def download_and_parse():
-            async with async_playwright() as pw:
-                browser = await pw.chromium.launch()
-                context = await browser.new_context(storage_state=STORAGE_STATE_FILE if os.path.exists(STORAGE_STATE_FILE) else None)
-                pdf_path = await download_schedule_for_show(context, show)
-                await context.storage_state(path=STORAGE_STATE_FILE)
-                await browser.close()
-                return pdf_path
-
-        pdf_path = await download_and_parse()  # Await async function
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch()
+            context = await browser.new_context(storage_state=STORAGE_STATE_FILE if os.path.exists(STORAGE_STATE_FILE) else None)
+            pdf_path = await download_schedule_for_show(context, show)
+            await context.storage_state(path=STORAGE_STATE_FILE)
+            await browser.close()
+            
         if not pdf_path:
             print(f"Skipping {show.get('show_name')} (no schedule PDF)")
             continue
