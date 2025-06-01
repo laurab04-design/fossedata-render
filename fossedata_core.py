@@ -203,19 +203,18 @@ async def download_schedule_for_show(context, show: dict) -> Optional[str]:
 
     page = await context.new_page()
     try:
-        await page.goto(show_url, timeout=60000)
-        
-        # Wait for the Schedule button and click it while catching the download
-        with page.expect_download(timeout=15000) as download_info:
-            await page.click("input#ctl00_ContentPlaceHolder_btnDownloadSchedule")
+        await page.goto(show_url, timeout=30000)
+
+        # Wait for the download triggered by clicking the orange Schedule button
+        async with page.expect_download() as download_info:
+            await page.click("input#ctl00_ContentPlaceHolder_btnDownloadSchedule", timeout=10000)
         download = await download_info.value
         await download.save_as(schedule_pdf_path)
-
-        print(f"[INFO] Downloaded schedule: {schedule_pdf_path}")
+        print(f"[INFO] Successfully downloaded: {schedule_pdf_path}")
         return schedule_pdf_path
 
     except Exception as e:
-        print(f"[ERROR] Playwright download failed for {show_url}: {e}")
+        print(f"[ERROR] Failed JS-triggered download for {show_url}: {e}")
         return None
     finally:
         await page.close()
