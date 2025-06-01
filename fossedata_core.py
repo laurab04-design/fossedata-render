@@ -194,41 +194,72 @@ async def fetch_show_list(page) -> List[dict]:
     return shows
 
 async def download_schedule_for_show(context, show: dict) -> Optional[str]:
+    # Attempt to download the schedule PDF using Playwright first,
+    # then fallback to an HTTP POST with hidden fields if needed.
+
     show_url = show.get("url")
     if not show_url:
-        print("[ERROR] No URL provided.")
         return None
 
+    # Generate a safe filename based on the show URL
     safe_id = re.sub(r"[^\w\-]", "_", show_url.split("/")[-1])
     schedule_pdf_path = f"schedule_{safe_id}.pdf"
 
     page = await context.new_page()
     try:
-        print(f"[INFO] Visiting {show_url}")
         await page.goto(show_url, timeout=30000)
 
-        # Wait up to 10 seconds for the download to trigger
-        async with page.expect_download(timeout=10000) as download_info:
-            await page.click("input#ctl00_ContentPlaceHolder_btnDownloadSchedule")
-        download = await download_info.value
+        # Try clicking the Schedule button using Playwright
+        button = await page.query_selector("input#ctl00_ContentPlaceHolder_btnDownloadSchedule")
+        if button:
+            try:
+                async with page.expect_download() as download_info:
+                    await button.click()
+                download = await download_info.value
+                await download.save_as(schedule_pdf_path)
 
-        # Show file name (temp) before saving
-        print(f"[INFO] Download started: suggested filename = {download.suggested_filename}")
-        await download.save_as(schedule_pdf_path)
+                if os.path.exists(schedule_pdf_path) and os.path.getsize(schedule_pdf_path) > 1000:
+                    print(f"[INFO] Downloaded schedule via Playwright: {schedule_pdf_path}")
+                    return schedule_pdf_path
+                else:
+                    print(f"[WARN] Downloaded file too small, falling back to POST")
 
-        if not os.path.isfile(schedule_pdf_path) or os.path.getsize(schedule_pdf_path) < 1000:
-            print(f"[ERROR] File saved but suspiciously small or missing: {schedule_pdf_path}")
-            return None
+            except Exception as e:
+                print(f"[WARN] Playwright download failed: {e}, trying POST fallback")
 
-        print(f"[INFO] Downloaded and saved: {schedule_pdf_path}")
-        return schedule_pdf_path
+        # Fallback: Extract hidden state fields and POST manually
+        viewstate = await page.get_attribute("input[name='__VIEWSTATE']", "value")
+        eventvalidation = await page.get_attribute("input[name='__EVENTVALIDATION']", "value")
+        generator = await page.get_attribute("input[name='__VIEWSTATEGENERATOR']", "value")
+
+        form_data = {
+            "__VIEWSTATE": viewstate,
+            "__EVENTVALIDATION": eventvalidation,
+            "__VIEWSTATEGENERATOR": generator or "",
+            "ctl00$ContentPlaceHolder$btnDownloadSchedule": "Schedule"
+        }
+
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Referer": show_url
+        }
+
+        async with httpx.AsyncClient(follow_redirects=True) as client:
+            resp = await client.post(show_url, data=form_data, headers=headers)
+            if "application/pdf" in resp.headers.get("content-type", "").lower():
+                with open(schedule_pdf_path, "wb") as f:
+                    f.write(resp.content)
+                print(f"[INFO] Downloaded schedule via POST fallback: {schedule_pdf_path}")
+                return schedule_pdf_path
+            else:
+                print(f"[ERROR] Fallback content-type: {resp.headers.get('content-type')}")
+                return None
 
     except Exception as e:
-        print(f"[ERROR] Failed to download schedule from {show_url}: {e}")
+        print(f"[ERROR] Failed to download schedule for {show_url}: {e}")
         return None
     finally:
         await page.close()
-    
 def parse_pdf_for_info(pdf_path: str) -> Optional[dict]:
     #Extract relevant information from the schedule PDF.
     #Includes entry fees, catalogue prices, judges, and whether eligible classes are present.
