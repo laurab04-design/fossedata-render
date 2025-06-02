@@ -1,8 +1,9 @@
-## Introducing attempt number # fossedata_core.py
+# Introducing attempt number # fossedata_core.py
 
 import os
 import io
 import re
+import aiofiles
 import csv
 import json
 import base64
@@ -211,7 +212,7 @@ async def download_schedule_for_show(context, show: dict) -> Optional[str]:
     if not show_url:
         print("[ERROR] No URL provided.")
         return None
-            
+
     safe_id = re.sub(r"[^\w\-]", "_", show_url.split("/")[-1])
     schedule_pdf_path = f"schedule_{safe_id}.pdf"
 
@@ -219,22 +220,30 @@ async def download_schedule_for_show(context, show: dict) -> Optional[str]:
     try:
         print(f"[INFO] Visiting {show_url}")
         await page.goto(show_url, timeout=30000)
+        await page.wait_for_selector("#ctl00_ContentPlaceHolder_btnDownloadSchedule", timeout=5000)
 
-        # Wait up to 10 seconds for the download to trigger
-        async with page.expect_download(timeout=10000) as download_info:
-            await page.wait_for_selector("#ctl00_ContentPlaceHolder_btnDownloadSchedule")
-        download = await download_info.value
+        async with context.expect_page() as popup_info:
+            await page.locator("#ctl00_ContentPlaceHolder_btnDownloadSchedule").click(force=True)
 
-        # Show file name (temp) before saving
-        print(f"[INFO] Download started: suggested filename = {download.suggested_filename}")
-        await download.save_as(schedule_pdf_path)
+        popup = await popup_info.value
+        await popup.wait_for_load_state()
+        pdf_url = popup.url
+        print(f"[DEBUG] Popup PDF URL: {pdf_url}")
 
-        if not os.path.isfile(schedule_pdf_path) or os.path.getsize(schedule_pdf_path) < 1000:
-            print(f"[ERROR] File saved but suspiciously small or missing: {schedule_pdf_path}")
+        # Manually download using requests
+        headers = {
+            "User-Agent": "Mozilla/5.0",  # just in case the site blocks bots
+        }
+
+        resp = requests.get(pdf_url, headers=headers)
+        if resp.status_code == 200 and b"%PDF" in resp.content[:1024]:
+            async with aiofiles.open(schedule_pdf_path, mode='wb') as f:
+                await f.write(resp.content)
+            print(f"[INFO] Downloaded and saved: {schedule_pdf_path}")
+            return schedule_pdf_path
+        else:
+            print(f"[ERROR] Failed to fetch PDF from {pdf_url}, status: {resp.status_code}")
             return None
-
-        print(f"[INFO] Downloaded and saved: {schedule_pdf_path}")
-        return schedule_pdf_path
 
     except Exception as e:
         print(f"[ERROR] Failed to download schedule from {show_url}: {e}")
