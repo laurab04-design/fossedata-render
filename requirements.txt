@@ -13,3 +13,4 @@ PyMuPDF>=1.18
 PyPDF2>=3.0.0
 python-dotenv>=0.19.0
 httpx>=0.24
+aiofiles>=23.1.0
