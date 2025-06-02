@@ -209,7 +209,7 @@ async def download_schedule_for_show(context, show: dict) -> Optional[str]:
 
         # Wait up to 10 seconds for the download to trigger
         async with page.expect_download(timeout=10000) as download_info:
-            await page.click("ctl00_ContentPlaceHolder_btnDownloadSchedule")
+            await page.click("#ctl00_ContentPlaceHolder_btnDownloadSchedule")
         download = await download_info.value
 
         # Show file name (temp) before saving
