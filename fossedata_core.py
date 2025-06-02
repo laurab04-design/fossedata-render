@@ -1,4 +1,4 @@
-# Introducing attempt number # fossedata_core.py
+## Introducing attempt number # fossedata_core.py
 
 import os
 import io
@@ -193,12 +193,25 @@ async def fetch_show_list(page) -> List[dict]:
     print(f"[INFO] Collected {len(shows)} new shows")
     return shows
 
+async with async_playwright() as pw:
+    browser = await pw.chromium.launch()
+
+    context = await browser.new_context(
+        accept_downloads=True,
+        storage_state=STORAGE_STATE_FILE if os.path.exists(STORAGE_STATE_FILE) else None
+    )
+
+    pdf_path = await download_schedule_for_show(context, show)
+
+    await context.storage_state(path=STORAGE_STATE_FILE)
+    await browser.close()
+
 async def download_schedule_for_show(context, show: dict) -> Optional[str]:
     show_url = show.get("url")
     if not show_url:
         print("[ERROR] No URL provided.")
         return None
-
+            
     safe_id = re.sub(r"[^\w\-]", "_", show_url.split("/")[-1])
     schedule_pdf_path = f"schedule_{safe_id}.pdf"
 
@@ -209,7 +222,7 @@ async def download_schedule_for_show(context, show: dict) -> Optional[str]:
 
         # Wait up to 10 seconds for the download to trigger
         async with page.expect_download(timeout=10000) as download_info:
-            await page.click("#ctl00_ContentPlaceHolder_btnDownloadSchedule")
+            await page.wait_for_selector("#ctl00_ContentPlaceHolder_btnDownloadSchedule")
         download = await download_info.value
 
         # Show file name (temp) before saving
