@@ -22,12 +22,25 @@ from dateutil.parser import parse as date_parse
 from playwright.async_api import async_playwright
 from typing import List, Tuple, Optional
 from collections import defaultdict
+from kc_breeds import KC_BREEDS
 
 load_dotenv()
 
 # ===== Load Environment Variables Correctly =====
 google_service_account_key = os.getenv("GOOGLE_SERVICE_ACCOUNT_BASE64")
 gdrive_folder_id = os.getenv("GDRIVE_FOLDER_ID")
+BREED_KEYWORDS = [b.lower() for b in KC_BREEDS]
+
+BREED_KEYWORDS = [b.lower() for b in KC_BREEDS]
+
+for show in shows:
+    title = show.get("title", "").lower()
+
+    if any(keyword in title for keyword in BREED_KEYWORDS):
+        print(f"Skipping show due to breed keyword in title: {show['title']}")
+        continue
+
+    # continue as normal
 
 # Build Drive client exactly as before
 SCOPES = ["https://www.googleapis.com/auth/drive.file"]
@@ -123,12 +136,11 @@ def save_links(links: set):
     print(f"[INFO] Wrote {len(links)} links to aspx_links.txt")
     
 async def fetch_show_list(page) -> List[dict]:
-    
-    #Scrape the FosseData 'Shows to Enter' page for all .aspx links and show details.
+    # Scrape the FosseData 'Shows to Enter' page for all .aspx links and show details.
     await page.goto("https://fossedata.co.uk/shows/Shows-To-Enter.aspx", timeout=60000)
     html = await page.content()
     soup = BeautifulSoup(html, "html.parser")
-    
+
     rows = soup.select("tr.tableRow, tr.alternateRow, tr.tableRow.redBg, tr.alternateRow.redBg")
     existing_links = set(read_existing_links())
     new_links = set(existing_links)
@@ -139,11 +151,17 @@ async def fetch_show_list(page) -> List[dict]:
             show_name_div = row.find("div", class_="showName")
             date_td = row.find_all("td")[1]
             link_tag = row.find("a", string="Details")
-            
+
             if not show_name_div or not date_td or not link_tag:
                 continue
 
             show_name = show_name_div.get_text(strip=True)
+
+            # Skip any show with a breed/group keyword in the name
+            if any(keyword in show_name.lower() for keyword in BREED_KEYWORDS):
+                print(f"[SKIP] Excluding breed-specific show: {show_name}")
+                continue
+
             show_url = f"https://www.fossedata.co.uk/{link_tag['href']}"
             date_text = date_td.get_text(strip=True)
 
