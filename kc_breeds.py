@@ -62,7 +62,7 @@ KC_BREEDS = [
     "Portuguese Water Dog", "Rottweiler", "Russian Black Terrier", "St. Bernard",
     "Siberian Husky", "Tibetan Mastiff", "Giant Schnauzer", "German Pinscher",
 
-    # Toy Group
+    # Toy Group 
     "Affenpinscher", "Bichon Frise", "Bolognese", "Cavalier King Charles Spaniel",
     "Chihuahua", "English Toy Terrier", "Griffon Bruxellois", "Havanese",
     "Italian Greyhound", "Japanese Chin", "King Charles Spaniel", "Lowchen",
