@@ -456,7 +456,7 @@ async def main_processing_loop(show_list: list):
         async with async_playwright() as pw:
             browser = await pw.chromium.launch()
             context = await browser.new_context(
-                accept_downloads=True
+                accept_downloads=True,
                 storage_state=STORAGE_STATE_FILE if os.path.exists(STORAGE_STATE_FILE) else None
             )
             pdf_path = await download_schedule_for_show(context, show)
