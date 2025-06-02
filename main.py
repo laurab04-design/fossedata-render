@@ -48,17 +48,13 @@ async def run_sync():
 
 @app.post("/run_bg")
 async def run_bg(background_tasks: BackgroundTasks):
-    """
-    Kicks off full_run() in the background (non-blocking).
-    """
+    #Kicks off full_run() in the background (non-blocking).
     # This is an asynchronous task, so let's add it to the background
     background_tasks.add_task(run_full_run)
     return {"status": "started", "message": "Background scrape kicked off"}
 
 async def run_full_run():
-    """
-    This function will run the full_run() and handle all steps in the background.
-    """
+    # This function will run the full_run() and handle all steps in the background.
     try:
         print("Starting background process...")
         # Await the results from the full_run coroutine
