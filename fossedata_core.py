@@ -194,19 +194,6 @@ async def fetch_show_list(page) -> List[dict]:
     print(f"[INFO] Collected {len(shows)} new shows")
     return shows
 
-async with async_playwright() as pw:
-    browser = await pw.chromium.launch()
-
-    context = await browser.new_context(
-        accept_downloads=True,
-        storage_state=STORAGE_STATE_FILE if os.path.exists(STORAGE_STATE_FILE) else None
-    )
-
-    pdf_path = await download_schedule_for_show(context, show)
-
-    await context.storage_state(path=STORAGE_STATE_FILE)
-    await browser.close()
-
 async def download_schedule_for_show(context, show: dict) -> Optional[str]:
     show_url = show.get("url")
     if not show_url:
