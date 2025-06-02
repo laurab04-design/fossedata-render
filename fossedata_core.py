@@ -209,7 +209,7 @@ async def download_schedule_for_show(context, show: dict) -> Optional[str]:
 
         # Wait up to 10 seconds for the download to trigger
         async with page.expect_download(timeout=10000) as download_info:
-            await page.eval_on_selector("#ctl00_ContentPlaceHolder_btnDownloadSchedule", "el => el.click()")
+            await page.click("#ctl00_ContentPlaceHolder_btnDownloadSchedule")
         download = await download_info.value
 
         # Show file name (temp) before saving
@@ -456,6 +456,7 @@ async def main_processing_loop(show_list: list):
         async with async_playwright() as pw:
             browser = await pw.chromium.launch()
             context = await browser.new_context(
+                accept_downloads=True
                 storage_state=STORAGE_STATE_FILE if os.path.exists(STORAGE_STATE_FILE) else None
             )
             pdf_path = await download_schedule_for_show(context, show)
