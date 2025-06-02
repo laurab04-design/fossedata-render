@@ -1,4 +1,4 @@
-# Introducing attempt number # fossedata_core.py
+# # Introducing attempt number # fossedata_core.py
 
 import os
 import io
@@ -144,7 +144,7 @@ async def fetch_show_list(page) -> List[dict]:
                 continue
 
             show_name = show_name_div.get_text(strip=True)
-            show_url = f"https://www.fossedata.co.uk/shows{link_tag['href']}"
+            show_url = f"https://www.fossedata.co.uk/{link_tag['href']}"
             date_text = date_td.get_text(strip=True)
 
             # Handle date range
