@@ -3,6 +3,9 @@
 
 import asyncio
 from playwright.async_api import async_playwright
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
 
 async def fetch_kc_breeds():
     url = "https://www.thekennelclub.org.uk/search/breeds-a-to-z/"
