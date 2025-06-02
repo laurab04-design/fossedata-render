@@ -194,49 +194,40 @@ async def fetch_show_list(page) -> List[dict]:
     print(f"[INFO] Collected {len(shows)} new shows")
     return shows
 
-async def download_schedule_for_show(context, show: dict) -> Optional[str]:
-    show_url = show.get("url")
-    if not show_url:
-        print("[ERROR] No URL provided.")
-        return None
-
-    safe_id = re.sub(r"[^\w\-]", "_", show_url.split("/")[-1])
-    schedule_pdf_path = f"schedule_{safe_id}.pdf"
-
-    page = await context.new_page()
+def download_schedule_via_post(show_url: str, schedule_pdf_path: str) -> Optional[str]:
     try:
-        print(f"[INFO] Visiting {show_url}")
-        await page.goto(show_url, timeout=30000)
-        await page.wait_for_selector("#ctl00_ContentPlaceHolder_btnDownloadSchedule", timeout=5000)
+        session = requests.Session()
+        session.headers.update({"User-Agent": "Mozilla/5.0"})
 
-        async with context.expect_page() as popup_info:
-            await page.locator("#ctl00_ContentPlaceHolder_btnDownloadSchedule").click(force=True)
+        # Step 1: Get the form page to extract hidden fields
+        resp = session.get(show_url)
+        soup = BeautifulSoup(resp.text, "html.parser")
 
-        popup = await popup_info.value
-        await popup.wait_for_load_state()
-        pdf_url = popup.url
-        print(f"[DEBUG] Popup PDF URL: {pdf_url}")
+        viewstate = soup.find("input", {"id": "__VIEWSTATE"}).get("value", "")
+        viewstategen = soup.find("input", {"id": "__VIEWSTATEGENERATOR"}).get("value", "")
+        event_validation_tag = soup.find("input", {"id": "__EVENTVALIDATION"})
+        event_validation = event_validation_tag.get("value", "") if event_validation_tag else ""
 
-        # Manually download using requests
-        headers = {
-            "User-Agent": "Mozilla/5.0",  # just in case the site blocks bots
+        form_data = {
+            "__VIEWSTATE": viewstate,
+            "__VIEWSTATEGENERATOR": viewstategen,
+            "__EVENTVALIDATION": event_validation,
+            "ctl00$ContentPlaceHolder$btnDownloadSchedule": "Schedule",
         }
 
-        resp = requests.get(pdf_url, headers=headers)
-        if resp.status_code == 200 and b"%PDF" in resp.content[:1024]:
-            async with aiofiles.open(schedule_pdf_path, mode='wb') as f:
-                await f.write(resp.content)
-            print(f"[INFO] Downloaded and saved: {schedule_pdf_path}")
+        post_resp = session.post(show_url, data=form_data)
+        if post_resp.status_code == 200 and b"%PDF" in post_resp.content[:1024]:
+            with open(schedule_pdf_path, "wb") as f:
+                f.write(post_resp.content)
+            print(f"[INFO] Downloaded schedule via POST: {schedule_pdf_path}")
             return schedule_pdf_path
         else:
-            print(f"[ERROR] Failed to fetch PDF from {pdf_url}, status: {resp.status_code}")
+            print(f"[ERROR] POST failed or not a PDF. Status: {post_resp.status_code}")
             return None
 
     except Exception as e:
-        print(f"[ERROR] Failed to download schedule from {show_url}: {e}")
+        print(f"[ERROR] POST schedule download failed for {show_url}: {e}")
         return None
-    finally:
-        await page.close()
     
 def parse_pdf_for_info(pdf_path: str) -> Optional[dict]:
     #Extract relevant information from the schedule PDF.
@@ -461,16 +452,10 @@ async def main_processing_loop(show_list: list):
         # === Fetch postal close date ===
         postal_close_date = await fetch_postal_close_date(show_url)
 
-        # === Download schedule using Playwright PDF interception ===
-        async with async_playwright() as pw:
-            browser = await pw.chromium.launch()
-            context = await browser.new_context(
-                accept_downloads=True,
-                storage_state=STORAGE_STATE_FILE if os.path.exists(STORAGE_STATE_FILE) else None
-            )
-            pdf_path = await download_schedule_for_show(context, show)
-            await context.storage_state(path=STORAGE_STATE_FILE)
-            await browser.close()
+        # === Download schedule via POST to .aspx ===
+        safe_id = re.sub(r"[^\w\-]", "_", show_url.split("/")[-1])
+        schedule_pdf_path = f"schedule_{safe_id}.pdf"
+        pdf_path = download_schedule_via_post(show_url, schedule_pdf_path)
 
         if not pdf_path:
             print(f"Skipping {show.get('show_name')} (no schedule PDF)")
@@ -505,7 +490,6 @@ async def main_processing_loop(show_list: list):
     upload_to_google_drive()
     print("Processing loop complete.")
     return results
-    
 
 def extract_text_from_pdf(file_obj) -> str:
     #Extract text from a PDF file object.
