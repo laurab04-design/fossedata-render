@@ -278,24 +278,12 @@ def download_schedule_via_post(show_url: str, schedule_pdf_path: str) -> Optiona
 
         # === Extract venue from schema.org PostalAddress block ===
         address_block = soup.find("span", itemprop="address")
-        venue_parts = []
+        venue = ""
 
         if address_block:
-            street = address_block.find("span", itemprop="streetAddress")
-            locality = address_block.find("span", itemprop="addressLocality")
-            region = address_block.find("span", itemprop="addressRegion")
             postcode = address_block.find("span", itemprop="postalCode")
-
-            if street:
-                venue_parts.append(street.get_text(strip=True))
-            if locality:
-                venue_parts.append(locality.get_text(strip=True))
-            if region:
-                venue_parts.append(region.get_text(strip=True))
             if postcode:
-                venue_parts.append(postcode.get_text(strip=True))
-
-        venue = ", ".join(venue_parts)
+                venue = postcode.get_text(strip=True)
 
         # === Extract hidden form fields ===
         viewstate = soup.find("input", {"id": "__VIEWSTATE"}).get("value", "")
