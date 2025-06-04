@@ -402,34 +402,3 @@ def scrape_all_results(start_year=2007, end_year=None, output_csv="golden_retrie
 
 # Constants
 RESULTS_URL = "https://www.fossedata.co.uk/show-results/"
-
-if __name__ == "__main__":
-    # Embedded test logic for validation
-    # Example: scrape a single year and a specific show to verify output
-    test_year = 2023
-    print(f"Testing scraper for year {test_year}...")
-    session = requests.Session()
-    session.headers.update({"User-Agent": "Mozilla/5.0"})
-    resp = session.get(RESULTS_URL)
-    soup = BeautifulSoup(resp.text, "html.parser")
-    vs = soup.find("input", {"id": "__VIEWSTATE"})["value"] if soup.find("input", {"id": "__VIEWSTATE"}) else ""
-    ev = soup.find("input", {"id": "__EVENTVALIDATION"})["value"] if soup.find("input", {"id": "__EVENTVALIDATION"}) else ""
-    vg = soup.find("input", {"id": "__VIEWSTATEGENERATOR"})["value"] if soup.find("input", {"id": "__VIEWSTATEGENERATOR"}) else ""
-    shows_2023 = get_year_show_list(session, test_year, vs, ev, vg)
-    print(f"Found {len(shows_2023)} shows in {test_year}.")
-    # Find a known multi-breed show in 2023 that likely has Golden Retrievers (e.g., Midland Counties Canine Society 2023)
-    sample_show = None
-    for name, date, url in shows_2023:
-        if "Midland Counties Canine Society" in name or "Manchester Dog Show Society" in name or "Crufts" in name:
-            sample_show = (name, date, url)
-            break
-    if sample_show:
-        name, date, url = sample_show
-        print(f"Scraping sample show: {name} ({date})")
-        results = scrape_show_results(session, name, date, url)
-        print(f"Extracted {len(results)} Golden Retriever result entries from {name}.")
-        # Print first 5 results for inspection
-        for r in results[:5]:
-            print(r)
-    else:
-        print("No sample show found for testing.")
