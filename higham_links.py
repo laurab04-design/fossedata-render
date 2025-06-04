@@ -10,7 +10,6 @@ def fetch_higham_show_links():
 
     soup = BeautifulSoup(html, "html.parser")
     anchors = soup.find_all("a", href=True)
-
     shows = []
 
     for anchor in anchors:
@@ -24,7 +23,6 @@ def fetch_higham_show_links():
 
         full_url = href if href.startswith("http") else f"https://www.highampress.co.uk{href}"
 
-        # Initialise date values
         start_date = end_date = entry_close = None
         time_tags = parent.find_all("time") if parent else []
 
@@ -45,16 +43,18 @@ def fetch_higham_show_links():
             elif parsed_date != start_date:
                 end_date = parsed_date
 
-        shows.append((full_url,
-                      start_date.isoformat() if start_date else "",
-                      end_date.isoformat() if end_date else "",
-                      entry_close.isoformat() if entry_close else ""))
+        shows.append((
+            full_url,
+            start_date.isoformat() if start_date else "",
+            end_date.isoformat() if end_date else "",
+            entry_close.isoformat() if entry_close else ""
+        ))
 
     return shows
 
-if __name__ == "__main__":
+def save_higham_links_to_file(output_file="higham_links.txt"):
     show_links = fetch_higham_show_links()
-    with open("higham_links.txt", "w") as f:
+    with open(output_file, "w") as f:
         for url, start, end, close in show_links:
             f.write(f"{url}\t{start}\t{end}\t{close}\n")
-    print(f"Saved {len(show_links)} shows to higham_links.txt")
+    print(f"Saved {len(show_links)} shows to {output_file}")
