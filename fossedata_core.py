@@ -22,7 +22,7 @@ from typing import List, Tuple, Optional
 from collections import defaultdict
 from kc_breeds import KC_BREEDS
 from fossedata_results import scrape_all_results
-from higham_links import show_links
+from higham_links import fetch_higham_show_links
 
 load_dotenv()
 
