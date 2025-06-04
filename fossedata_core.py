@@ -21,7 +21,8 @@ from playwright.async_api import async_playwright
 from typing import List, Tuple, Optional
 from collections import defaultdict
 from kc_breeds import KC_BREEDS
-from fossedata_golden_results import scrape_all_results
+from fossedata_results import scrape_all_results
+from higham_links import show_links
 
 load_dotenv()
 
@@ -97,6 +98,7 @@ TRAVEL_CACHE_FILE = "travel_cache.json"
 CLASH_OVERNIGHT_CSV = "clashes_overnight.csv"
 WINS_LOG_FILE = "wins.json"
 GOLDEN_RESULTS_FILE="golden_results.csv"
+HIGHAM_LINKS_FILE="higham_links.txt"
 
 LITERS_PER_GALLON = 4.54609
 HOME_POSTCODE = os.environ.get("HOME_POSTCODE", "YO8 9NA")
@@ -774,6 +776,7 @@ def upload_to_google_drive():
         upload_file(PROCESSED_SHOWS_FILE, "application/json")
         upload_file(TRAVEL_CACHE_FILE,"application/json")
         upload_file(GOLDEN_RESULTS_FILE, "text/csv")
+        upload_file(HIGHAM_LINKS_FILE,"text/plain")
         for pdf_file in Path(".").glob("schedule_*.pdf"):
             upload_file(str(pdf_file), "application/pdf")
         upload_file(ASPX_LINKS, "text/plain")
@@ -840,6 +843,9 @@ def parse_postal_close_date_from_html(html: str) -> Optional[datetime.date]:
         
 def run_golden_scrape():
     scrape_all_results(start_year=2007, output_csv="golden_results.csv")
+    
+def run_higham_links():
+    show_links(output_txt="higham_links.txt")
         
 async def main_processing_loop(show_list: list):
     global processed_shows
@@ -933,6 +939,8 @@ async def main_processing_loop(show_list: list):
     return results
 
 async def full_run():
+    run_golden_scrape()
+    run_higham_links()
     # Fetch the list of shows
     async with async_playwright() as pw:
         browser = await pw.chromium.launch()
