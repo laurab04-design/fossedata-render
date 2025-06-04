@@ -53,6 +53,30 @@ async def run_bg(background_tasks: BackgroundTasks):
     background_tasks.add_task(run_full_run)
     return {"status": "started", "message": "Background scrape kicked off"}
 
+@app.post("/golden_results")
+async def golden_results():
+    """
+    Scrapes Golden Retriever results from 2007 onward and saves to golden_results.csv
+    """
+    try:
+        from fossedata_core import run_golden_scrape
+        run_golden_scrape()
+        return {"status": "ok", "message": "Golden Retriever results scraped and saved."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/higham_links")
+async def higham_links():
+    """
+    Scrapes Higham breed-specific show links and saves to higham_links.txt
+    """
+    try:
+        from fossedata_core import run_higham_links
+        run_higham_links()
+        return {"status": "ok", "message": "Higham links scraped and saved."}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 async def run_full_run():
     # This function will run the full_run() and handle all steps in the background.
     try:
