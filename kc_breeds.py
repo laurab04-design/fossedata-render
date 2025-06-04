@@ -71,7 +71,7 @@ KC_BREEDS = [
 
     # Broad catchalls
     "terrier", "hound", "toy", "spaniel", "bulldog", "collie",
-    "spitz", "sheepdog", "pastoral", "working", "corgi", "pointer", "setter", "bichon", "basset", "heeler","limited"
+    "spitz", "sheepdog", "pastoral", "working", "corgi", "pointer", "setter", "bichon", "basset", "heeler","limited", "beauceron"
 ]
 
 # Deduplicate and sort for sanity
