@@ -3,7 +3,6 @@
 import os
 import io
 import re
-import aiofiles
 import csv
 import json
 import base64
@@ -11,7 +10,6 @@ import requests
 import datetime
 import pdfplumber
 import asyncio
-import PyPDF2
 from pathlib import Path
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
@@ -23,6 +21,7 @@ from playwright.async_api import async_playwright
 from typing import List, Tuple, Optional
 from collections import defaultdict
 from kc_breeds import KC_BREEDS
+from fossedata_golden_results import scrape_all_results
 
 load_dotenv()
 
@@ -30,6 +29,12 @@ load_dotenv()
 google_service_account_key = os.getenv("GOOGLE_SERVICE_ACCOUNT_BASE64")
 gdrive_folder_id = os.getenv("GDRIVE_FOLDER_ID")
 BREED_KEYWORDS = [b.lower() for b in KC_BREEDS]
+GOOGLE_MAPS_API_KEY = os.getenv("GOOGLE_MAPS_API_KEY")
+HOME_POSTCODE = os.getenv("HOME_POSTCODE")
+MPG = os.getenv("MPG")
+OVERNIGHT_THRESHOLD_HOURS = os.getenv("OVERNIGHT_THRESHOLD_HOURS")
+OVERNIGHT_COST = os.getenv("OVERNIGHT_COST")
+MAX_PAIR_GAP_MINUTES = os.getenv("MAX_PAIR_GAP_MINUTES")
 
 # Build Drive client exactly as before
 SCOPES = ["https://www.googleapis.com/auth/drive.file"]
@@ -89,11 +94,25 @@ RESULTS_CSV = "results.csv"
 RESULTS_JSON = "results.json"
 ASPX_LINKS = "aspx_links.txt"
 TRAVEL_CACHE_FILE = "travel_cache.json"
+CLASH_OVERNIGHT_CSV = "clashes_overnight.csv"
+WINS_LOG_FILE = "wins.json"
+GOLDEN_RESULTS_FILE="golden_results.csv"
+
+LITERS_PER_GALLON = 4.54609
+HOME_POSTCODE = os.environ.get("HOME_POSTCODE", "YO8 9NA")
+GOOGLE_MAPS_API_KEY = os.environ.get("GOOGLE_MAPS_API_KEY")
+DOG_DOB = datetime.datetime.strptime(os.environ.get("DOG_DOB", "2024-05-15"), "%Y-%m-%d").date()
+MPG = float(os.environ.get("MPG", 40))
+OVERNIGHT_THRESHOLD_HOURS = float(os.environ.get("OVERNIGHT_THRESHOLD_HOURS", 3))
+OVERNIGHT_COST = float(os.environ.get("OVERNIGHT_COST", 100))
 
 download_from_drive("processed_shows.json")
 download_from_drive("storage_state.json")
 download_from_drive("aspx_links.txt")
 download_from_drive("travel_cache.json")
+download_from_drive("wins.json")
+download_from_drive("clashes_overnight.csv")
+download_from_drive("golden_results.csv")
 
 # ===== Travel Cache Configuration =====
 travel_updated = False  # Global flag to track if travel cache was changed
@@ -128,6 +147,26 @@ if os.path.isfile(PROCESSED_SHOWS_FILE):
     except Exception as e:
         print(f"Warning: Could not load {PROCESSED_SHOWS_FILE}: {e}")
         {}
+
+# ===== Diesel Price =====
+def fetch_gov_diesel_price():
+    url = "https://assets.publishing.service.gov.uk/government/uploads/system/uploads/attachment_data/file/1254009/weekly-road-fuel-prices.csv"
+    try:
+        resp = requests.get(url, timeout=10)
+        if resp.status_code == 200:
+            csv_text = resp.content.decode('utf-8')
+            reader = csv.DictReader(io.StringIO(csv_text))
+            rows = list(reader)
+            latest_row = rows[-1]
+            diesel_price_ppl = latest_row.get('Diesel', '').replace('p', '').strip()
+            if diesel_price_ppl:
+                return float(diesel_price_ppl) / 100.0
+    except Exception as e:
+        print(f"Warning: Gov fuel price fetch failed: {e}")
+    return 1.57
+
+diesel_price_per_litre = fetch_gov_diesel_price()
+print(f"Gov diesel price: £{diesel_price_per_litre:.2f} per litre")
 
 def read_existing_links() -> List[str]:
     #Read show URLs from aspx_links.txt if present
@@ -312,7 +351,7 @@ def get_travel_info(destination: str, travel_cache: dict) -> dict:
             distance_miles = float(distance_text.replace(" mi", "").replace(",", ""))
             duration_hours = float(data["rows"][0]["elements"][0]["duration"]["value"]) / 3600
 
-            estimated_cost = (distance_miles / MPG) * 6.5  # adjust per litre price if needed
+            estimated_cost = calculate_diesel_cost(distance_miles, diesel_price_per_litre, MPG)
             overnight = duration_hours > OVERNIGHT_THRESHOLD_HOURS
 
             travel_info = {
@@ -334,7 +373,53 @@ def get_travel_info(destination: str, travel_cache: dict) -> dict:
     except Exception as e:
         print(f"[ERROR] Failed to fetch travel info for {destination}: {e}")
         return {}
-    
+
+def get_between_travel_info(origin: str, destination: str, cache: dict) -> dict:
+    # Get travel time between two venues. Uses cache if available, fetches if missing.
+    if not origin or not destination:
+        return {"distance_miles": 0, "drive_time_minutes": 9999}
+
+    key = f"{origin}||{destination}"
+    if 'between' not in cache:
+        cache['between'] = {}
+
+    if key in cache['between']:
+        return cache['between'][key]
+
+    try:
+        api_key = os.getenv("GOOGLE_MAPS_API_KEY")
+        params = {
+            "origin": origin,
+            "destination": destination,
+            "key": api_key,
+            "units": "imperial",
+        }
+        resp = requests.get("https://maps.googleapis.com/maps/api/directions/json", params=params, timeout=10)
+        data = resp.json()
+        if data["status"] == "OK":
+            leg = data["routes"][0]["legs"][0]
+            miles = float(leg["distance"]["text"].replace(" mi", ""))
+            minutes = leg["duration"]["value"] // 60
+            result = {"distance_miles": miles, "drive_time_minutes": minutes}
+            cache['between'][key] = result
+            return result
+        else:
+            print(f"Google Maps API error between {origin} and {destination}: {data['status']}")
+    except Exception as e:
+        print(f"Error fetching between-venue travel info from {origin} to {destination}: {e}")
+
+    # Cache the failure so it doesn't retry repeatedly
+    cache['between'][key] = {"distance_miles": 0, "drive_time_minutes": 9999}
+    return cache['between'][key]
+
+def calculate_diesel_cost(distance_miles: float, price_per_litre: float, mpg: float) -> float:
+    # Calculates round-trip diesel cost for given distance, diesel price, and mpg.
+    if mpg <= 0:
+        return 0.0
+    gallons_needed = (distance_miles * 2) / mpg  # Round trip
+    litres_needed = gallons_needed * LITERS_PER_GALLON
+    return round(litres_needed * price_per_litre, 2)
+
 def parse_pdf_for_info(pdf_path: str, show_name:str) -> Optional[dict]:
     #Extract relevant information from the schedule PDF.
     #Includes entry fees, catalogue prices, judges, and whether eligible classes are present.
@@ -416,13 +501,16 @@ def extract_judges(text: str, show_name: str = "") -> Tuple[Optional[str], Optio
     # Split into lines for structured parsing
     lines = text.splitlines()
     text_lower = text.lower()
-    is_single_breed = "golden retriever club" in show_name.lower() or (
-        "golden retriever" in show_name.lower() and not any(
-            breed in text_lower for breed in [
-                "labrador", "spaniel", "pointer", "setter", "beagle", "whippet",
-                "terrier", "dachshund", "rottweiler", "gundog group", "pastoral",
-                "working", "hound", "toy", "utility"
-            ]
+
+    is_single_breed = (
+        "golden retriever club" in show_name.lower()
+        or (
+            "golden retriever" in show_name.lower()
+            and not any(
+                breed in text_lower
+                for breed in KC_BREEDS
+                if breed != "golden retriever"
+            )
         )
     )
 
@@ -442,7 +530,7 @@ def extract_judges(text: str, show_name: str = "") -> Tuple[Optional[str], Optio
 
     judge_dogs = None
     judge_bitches = None
-
+    
     # === SINGLE BREED STRATEGY ===
     if is_single_breed:
         dog_match = re.search(r"(Dogs?:)\s*(.+)", text, flags=re.IGNORECASE)
@@ -492,6 +580,128 @@ def extract_judges(text: str, show_name: str = "") -> Tuple[Optional[str], Optio
                         return judge_dogs, judge_bitches
 
     return judge_dogs, judge_bitches
+    
+def detect_clashes(results: List[dict]) -> List[dict]:
+    """
+    Detect same-day show clashes (ignoring if same postcode).
+    """
+    clashes = []
+    shows_by_date = defaultdict(list)
+
+    for r in results:
+        show_date = r.get("show_date") or r.get("date")
+        if show_date:
+            shows_by_date[show_date].append(r)
+
+    for date, show_list in shows_by_date.items():
+        if len(show_list) > 1:
+            for i in range(len(show_list)):
+                for j in range(i + 1, len(show_list)):
+                    s1 = show_list[i]
+                    s2 = show_list[j]
+                    pc1 = extract_postcode(s1.get("venue", ""))
+                    pc2 = extract_postcode(s2.get("venue", ""))
+                    if pc1 and pc2 and pc1.upper() == pc2.upper():
+                        continue  # Same postcode = allowed
+                    clashes.append({
+                        "type": "Clash",
+                        "date": date,
+                        "show1": s1["show_name"],
+                        "show2": s2["show_name"]
+                    })
+    return clashes
+    
+def detect_overnight_pairs(
+    results: List[dict],
+    travel_cache: dict
+) -> List[dict]:
+
+    #Detect overnight stay chains:
+    # Shows on consecutive days
+    # Both >3h from home
+    # Consecutive pairs within MAX_PAIR_GAP_MINUTES of each other
+    # Allows multi-day chaining
+    
+    overnights = []
+    max_pair_gap_minutes = int(os.getenv("MAX_PAIR_GAP_MINUTES", "75"))
+    max_shows = os.getenv("MAX_SHOWS")
+    max_shows = int(max_shows) if max_shows and max_shows.isdigit() else None  # Unlimited if unset
+
+    results_by_date = sorted(
+        [r for r in results if r.get("show_date") or r.get("date")],
+        key=lambda x: date_parse(x.get("show_date") or x.get("date")).date()
+    )
+
+    for i, show_a in enumerate(results_by_date):
+        chain = [show_a]
+        travel_times = []
+        date_a = date_parse(show_a.get("show_date") or show_a.get("date")).date()
+        time_from_home = show_a.get("drive_time_minutes", 0)
+        if time_from_home < 180:
+            continue  # Only care about shows over 3h away
+
+        current_date = date_a
+        current_show = show_a
+
+        while True:
+            next_day = current_date + datetime.timedelta(days=1)
+            next_day_shows = [
+                r for r in results_by_date
+                if date_parse(r.get("show_date") or r.get("date")).date() == next_day
+            ]
+            found_next = False
+            for show_b in next_day_shows:
+                venue_a = current_show['venue']
+                venue_b = show_b['venue']
+                if not venue_a or not venue_b:
+                    continue
+
+                travel_ab = get_between_travel_info(venue_a, venue_b, travel_cache)
+                time_ab = travel_ab.get('drive_time_minutes', 9999)
+                if time_ab <= max_pair_gap_minutes:
+                    chain.append(show_b)
+                    travel_times.append(time_ab)
+                    current_date = next_day
+                    current_show = show_b
+                    found_next = True
+                    break  # Only chain to one next show per day
+
+            if not found_next:
+                break  # No link in the chain
+
+            if max_shows and len(chain) >= max_shows:
+                break  # Hit max chain length if defined
+
+        if len(chain) > 1:  # Only flag chains with at least two shows
+            overnights.append({
+                "type": "Overnight Suggestion",
+                "dates": [s.get("show_date") or s.get("date") for s in chain],
+                "shows": [s['show_name'] for s in chain],
+                "chain_length": len(chain),
+                "between_travel_times": travel_times
+            })
+
+    return overnights
+
+def load_wins_log() -> list:
+    #Load the wins log JSON file.
+    #Returns an empty list if file not found or unreadable.
+
+    if not os.path.isfile(WINS_LOG_FILE):
+        print(f"No wins log found at {WINS_LOG_FILE}.")
+        return []
+
+    try:
+        with open(WINS_LOG_FILE, "r") as f:
+            wins = json.load(f)
+            if isinstance(wins, list):
+                return wins
+            else:
+                print(f"Warning: {WINS_LOG_FILE} is not a list.")
+                return []
+    except Exception as e:
+        print(f"Error loading {WINS_LOG_FILE}: {e}")
+        return []
     
 def save_results(results, processed_shows):
     #Save results and caches to local files
@@ -563,6 +773,7 @@ def upload_to_google_drive():
         upload_file(RESULTS_CSV, "text/csv")
         upload_file(PROCESSED_SHOWS_FILE, "application/json")
         upload_file(TRAVEL_CACHE_FILE,"application/json")
+        upload_file(GOLDEN_RESULTS_FILE, "text/csv")
         for pdf_file in Path(".").glob("schedule_*.pdf"):
             upload_file(str(pdf_file), "application/pdf")
         upload_file(ASPX_LINKS, "text/plain")
@@ -627,6 +838,9 @@ def parse_postal_close_date_from_html(html: str) -> Optional[datetime.date]:
     else:
         return None
         
+def run_golden_scrape():
+    scrape_all_results(start_year=2007, output_csv="golden_results.csv")
+        
 async def main_processing_loop(show_list: list):
     global processed_shows
     results = []
@@ -667,6 +881,9 @@ async def main_processing_loop(show_list: list):
         if show.get("type", "Unknown") == "Unknown" and "type" in info:
             show["type"] = info["type"]
 
+        # === Travel data ===
+        travel_info = get_travel_info(venue, travel_cache) if venue else {}
+
         result = {
             "show_url": show_url,
             "show_name": show.get("show_name"),
@@ -679,13 +896,34 @@ async def main_processing_loop(show_list: list):
             "subsequent_entry_fee": info.get("subsequent_entry_fee"),
             "catalogue_fee": info.get("catalogue_price"),
             "entry_close": postal_close_date.isoformat() if postal_close_date else None,
+            "distance_miles": travel_info.get("distance_miles"),
+            "duration_hours": travel_info.get("duration_hours"),
+            "estimated_cost": travel_info.get("estimated_cost"),
+            "overnight_required": travel_info.get("overnight_required"),
+            "overnight_cost": travel_info.get("overnight_cost"),
         }
 
         results.append(result)
         processed_shows.add(show_url)
 
         if len(results) % 5 == 0:
+            # Patch in missing drive time from cache before saving
+            for r in results:
+                venue = r.get("venue")
+                if venue and "drive_time_minutes" not in r:
+                    cached = travel_cache.get(venue)
+                    if cached and "duration_hours" in cached:
+                        r["drive_time_minutes"] = round(cached["duration_hours"] * 60)
+
             save_results(results, processed_shows)
+
+    # Final patch before last save
+    for r in results:
+        venue = r.get("venue")
+        if venue and "drive_time_minutes" not in r:
+            cached = travel_cache.get(venue)
+            if cached and "duration_hours" in cached:
+                r["drive_time_minutes"] = round(cached["duration_hours"] * 60)
 
     if travel_updated:
         save_travel_cache(travel_cache)
@@ -707,6 +945,26 @@ async def full_run():
 
     # Save results after all processing
     save_results(results, processed_shows)
+
+    # Detect and write clashes and overnights
+    clashes = detect_clashes(results)
+    overnights = detect_overnight_pairs(results, load_travel_cache())
+
+    with open(CLASH_OVERNIGHT_CSV, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["Type", "Date", "Show 1", "Show 2", "Chain Length", "Between Travel Times"])
+        for c in clashes:
+            writer.writerow([c["type"], c["date"], c["show1"], c["show2"], "", ""])
+        for o in overnights:
+            writer.writerow([
+                o["type"],
+                ", ".join(o["dates"]),
+                o["shows"][0],
+                o["shows"][-1],
+                o["chain_length"],
+                ", ".join(str(t) for t in o["between_travel_times"])
+            ])
+
     return results
 
 
