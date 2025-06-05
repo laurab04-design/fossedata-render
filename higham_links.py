@@ -9,9 +9,28 @@ async def fetch_higham_show_links():
         await page.goto("https://www.highampress.co.uk/shows")
 
         all_shows = []
+        visited_pages = set()
 
-        while True:
-            await page.wait_for_selector("a[href*='/shows/']")
+        # Identify how many pages exist via pagination buttons
+        await page.wait_for_selector("button[aria-label^='Go to page']")
+        pagination_buttons = page.locator("button[aria-label^='Go to page']")
+        count = await pagination_buttons.count()
+
+        for i in range(count):
+            button = pagination_buttons.nth(i)
+            label = await button.get_attribute("aria-label")
+            if not label or not label.lower().startswith("go to page"):
+                continue
+
+            # Avoid re-clicking the current page
+            page_num = label.split()[-1]
+            if page_num in visited_pages:
+                continue
+            visited_pages.add(page_num)
+
+            await button.click()
+            await page.wait_for_timeout(1000)  # Allow Livewire update
+
             html = await page.content()
             soup = BeautifulSoup(html, "html.parser")
 
@@ -53,13 +72,6 @@ async def fetch_higham_show_links():
                     end_date.isoformat() if end_date else "",
                     entry_close.isoformat() if entry_close else ""
                 ))
-
-            # === Click Next button if available ===
-            next_button = await page.query_selector('button[wire\\:click="nextPage"]')
-            if not next_button or not await next_button.is_enabled():
-                break  # No more pages
-            await next_button.click()
-            await page.wait_for_timeout(1000)  # Let Livewire update
 
         await browser.close()
         return all_shows
