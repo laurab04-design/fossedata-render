@@ -934,7 +934,8 @@ async def main_processing_loop(show_list: list):
 
 async def full_run():
     run_golden_scrape()
-    run_higham_links()
+    await run_higham_links()  # <-- Fix: Await the async function
+
     # Fetch the list of shows
     async with async_playwright() as pw:
         browser = await pw.chromium.launch()
