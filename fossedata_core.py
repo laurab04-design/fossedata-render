@@ -833,11 +833,13 @@ def run_golden_scrape():
     scrape_all_results(start_year=2007, output_csv="golden_results.csv")
     
 def run_higham_links():
-    links = fetch_higham_show_links()
-    with open(HIGHAM_LINKS_FILE, "w") as f:
-        for url, start, end, close in links:
-            f.write(f"{url}\t{start}\t{end}\t{close}\n")
-    print(f"[INFO] Saved {len(links)} Higham show links.")
+    async def _inner():
+        links = await fetch_higham_show_links()
+        with open(HIGHAM_LINKS_FILE, "w") as f:
+            for url, start, end, close in links:
+                f.write(f"{url}\t{start}\t{end}\t{close}\n")
+        print(f"[INFO] Saved {len(links)} Higham show links.")
+    asyncio.run(_inner())
         
 async def main_processing_loop(show_list: list):
     global processed_shows
