@@ -23,7 +23,6 @@ from collections import defaultdict
 from kc_breeds import KC_BREEDS
 from fossedata_results import scrape_all_results
 from higham_links import fetch_higham_show_links
-from utils import extract_postcode
 
 load_dotenv()
 
@@ -116,6 +115,23 @@ download_from_drive("travel_cache.json")
 download_from_drive("wins.json")
 download_from_drive("clashes_overnight.csv")
 download_from_drive("golden_results.csv")
+
+import re
+
+def extract_postcode(text):
+    """
+    Extract the last full UK postcode from a given text.
+    Accepts standard UK postcode formats.
+    """
+    if not text:
+        return ""
+    
+    # UK postcode regex (fairly permissive, case-insensitive)
+    postcode_pattern = r'\b[A-Z]{1,2}\d{1,2}[A-Z]?\s*\d[A-Z]{2}\b'
+    matches = re.findall(postcode_pattern, text.upper())
+    
+    # Return the last match, which is usually the relevant one
+    return matches[-1] if matches else ""
 
 # ===== Travel Cache Configuration =====
 travel_updated = False  # Global flag to track if travel cache was changed
