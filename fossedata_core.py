@@ -23,6 +23,7 @@ from collections import defaultdict
 from kc_breeds import KC_BREEDS
 from fossedata_results import scrape_all_results
 from higham_links import fetch_higham_show_links
+from utils import extract_postcode
 
 load_dotenv()
 
@@ -276,14 +277,22 @@ def download_schedule_via_post(show_url: str, schedule_pdf_path: str) -> Optiona
         resp = session.get(show_url)
         soup = BeautifulSoup(resp.text, "html.parser")
 
-        # === Extract venue from schema.org PostalAddress block ===
-        address_block = soup.find("span", itemprop="address")
+        # === Extract venue and postcode from the actual Location section ===
         venue = ""
+        postcode = ""
 
-        if address_block:
-            postcode = address_block.find("span", itemprop="postalCode")
-            if postcode:
-                venue = postcode.get_text(strip=True)
+        location_heading = soup.find("h3", string="Location")
+        if location_heading:
+                p_tag = location_heading.find_next_sibling("p")
+                if p_tag and "Address:" in p_tag.text:
+                        venue_text = p_tag.text.replace("Address:", "").strip()
+                        venue = venue_text
+
+                        # Extract postcode from venue text
+                        postcode_match = re.search(r"\b[A-Z]{1,2}\d{1,2}[A-Z]?\s*\d[A-Z]{2}\b", venue_text)
+                        if postcode_match:
+                                postcode = postcode_match.group(0).upper()
+
 
         # === Extract hidden form fields ===
         viewstate = soup.find("input", {"id": "__VIEWSTATE"}).get("value", "")
@@ -314,56 +323,65 @@ def download_schedule_via_post(show_url: str, schedule_pdf_path: str) -> Optiona
         return None, ""
     
 def get_travel_info(destination: str, travel_cache: dict) -> dict:
-    global travel_updated
+        global travel_updated
 
-    if destination in travel_cache:
-        return travel_cache[destination]
+        if not destination:
+                print("[WARN] No destination provided for travel lookup.")
+                return {}
 
-    if not GOOGLE_MAPS_API_KEY:
-        print("[ERROR] No Google Maps API key configured.")
-        return {}
+        destination = destination.strip().upper()
 
-    base_url = "https://maps.googleapis.com/maps/api/distancematrix/json"
-    params = {
-        "origins": HOME_POSTCODE,
-        "destinations": destination,
-        "key": GOOGLE_MAPS_API_KEY,
-        "units": "imperial"
-    }
+        if destination in travel_cache:
+                return travel_cache[destination]
 
-    try:
-        response = requests.get(base_url, params=params)
-        data = response.json()
+        if not GOOGLE_MAPS_API_KEY:
+                print("[ERROR] No Google Maps API key configured.")
+                return {}
 
-        if data["status"] == "OK" and data["rows"][0]["elements"][0]["status"] == "OK":
-            distance_text = data["rows"][0]["elements"][0]["distance"]["text"]
-            duration_text = data["rows"][0]["elements"][0]["duration"]["text"]
-            distance_miles = float(distance_text.replace(" mi", "").replace(",", ""))
-            duration_hours = float(data["rows"][0]["elements"][0]["duration"]["value"]) / 3600
+        print(f"[INFO] Fetching travel info for postcode: {destination}")
 
-            estimated_cost = calculate_diesel_cost(distance_miles, diesel_price_per_litre, MPG)
-            overnight = duration_hours > OVERNIGHT_THRESHOLD_HOURS
+        base_url = "https://maps.googleapis.com/maps/api/distancematrix/json"
+        params = {
+                "origins": HOME_POSTCODE,
+                "destinations": destination,
+                "key": GOOGLE_MAPS_API_KEY,
+                "units": "imperial"
+        }
 
-            travel_info = {
-                "distance_miles": distance_miles,
-                "duration_hours": round(duration_hours, 2),
-                "estimated_cost": round(estimated_cost, 2),
-                "overnight_required": overnight,
-                "overnight_cost": OVERNIGHT_COST if overnight else 0
-            }
+        try:
+                response = requests.get(base_url, params=params, timeout=10)
+                data = response.json()
 
-            travel_cache[destination] = travel_info
-            travel_updated = True
-            return travel_info
+                if data["status"] == "OK" and data["rows"][0]["elements"][0]["status"] == "OK":
+                        distance_text = data["rows"][0]["elements"][0]["distance"]["text"]
+                        duration_value = data["rows"][0]["elements"][0]["duration"]["value"]
 
-        else:
-            print(f"[ERROR] Google Maps API error: {data['rows'][0]['elements'][0]['status']}")
-            return {}
+                        distance_miles = float(distance_text.replace(" mi", "").replace(",", ""))
+                        duration_hours = float(duration_value) / 3600
 
-    except Exception as e:
-        print(f"[ERROR] Failed to fetch travel info for {destination}: {e}")
-        return {}
+                        estimated_cost = calculate_diesel_cost(distance_miles, diesel_price_per_litre, MPG)
+                        overnight = duration_hours > OVERNIGHT_THRESHOLD_HOURS
 
+                        travel_info = {
+                                "distance_miles": distance_miles,
+                                "duration_hours": round(duration_hours, 2),
+                                "estimated_cost": round(estimated_cost, 2),
+                                "overnight_required": overnight,
+                                "overnight_cost": OVERNIGHT_COST if overnight else 0
+                        }
+
+                        travel_cache[destination] = travel_info
+                        travel_updated = True
+                        return travel_info
+
+                else:
+                        print(f"[ERROR] Google Maps API error: {data['rows'][0]['elements'][0]['status']}")
+                        return {}
+
+        except Exception as e:
+                print(f"[ERROR] Failed to fetch travel info for {destination}: {e}")
+                return {}
+                
 def get_between_travel_info(origin: str, destination: str, cache: dict) -> dict:
     # Get travel time between two venues. Uses cache if available, fetches if missing.
     if not origin or not destination:
@@ -410,40 +428,37 @@ def calculate_diesel_cost(distance_miles: float, price_per_litre: float, mpg: fl
     litres_needed = gallons_needed * LITERS_PER_GALLON
     return round(litres_needed * price_per_litre, 2)
 
-def parse_pdf_for_info(pdf_path: str, show_name:str) -> Optional[dict]:
-    #Extract relevant information from the schedule PDF.
-    #Includes entry fees, catalogue prices, judges, and whether eligible classes are present.
-    text = ""
+def parse_pdf_for_info(pdf_path: str, show_name: str) -> Optional[dict]:
+    import fitz  # PyMuPDF
+
+    blocks = []
     try:
-        import fitz  # PyMuPDF
         doc = fitz.open(pdf_path)
         for page in doc:
-            text += page.get_text()
+            blocks.extend(page.get_text("blocks"))  # (x0, y0, x1, y1, text, block_no, block_type)
         doc.close()
-    except Exception:
-        try:
-            with pdfplumber.open(pdf_path) as pdf:
-                for page in pdf.pages:
-                    page_text = page.extract_text()
-                    if page_text:
-                        text += page_text + "\n"
-        except Exception as e:
-            print(f"Failed to read PDF {pdf_path}: {e}")
-            return None
+    except Exception as e:
+        print(f"[ERROR] Failed to read PDF layout for {pdf_path}: {e}")
+        return None
 
-    text_lower = text.lower()
-    if "golden" not in text_lower:
-        return None  # Skip if Golden Retrievers not mentioned
+    # === Clean and sort blocks ===
+    text_blocks = [b for b in blocks if b[4].strip()]
+    sorted_blocks = sorted(text_blocks, key=lambda b: (round(b[1]), b[0]))  # Y then X
+
+    lines = [b[4].strip() for b in sorted_blocks if b[4].strip()]
+    full_text = "\n".join(lines).lower()
+
+    if "golden" not in full_text:
+        return None  # Skip if Goldens aren't even mentioned
 
     info = {
-        "first_entry_fee": extract_fee(r"First\s+Entry[^£]*£\s*([0-9]+(?:\.[0-9]{1,2})?)", text),
-        "subsequent_entry_fee": extract_fee(r"Subsequent[^£]*£\s*([0-9]+(?:\.[0-9]{1,2})?)", text),
-        "catalogue_price": extract_fee(r"Catalogue[^£]*£\s*([0-9]+(?:\.[0-9]{1,2})?)", text),
+        "first_entry_fee": extract_fee(r"First\s+Entry[^£]*£\s*([0-9]+(?:\.[0-9]{1,2})?)", full_text),
+        "subsequent_entry_fee": extract_fee(r"Subsequent[^£]*£\s*([0-9]+(?:\.[0-9]{1,2})?)", full_text),
+        "catalogue_price": extract_fee(r"Catalogue[^£]*£\s*([0-9]+(?:\.[0-9]{1,2})?)", full_text),
+        "type": extract_show_type_from_schedule(full_text),
     }
-    
-    info["type"] = extract_show_type_from_schedule(text)
 
-    judge_dogs, judge_bitches = extract_judges(text,show_name)
+    judge_dogs, judge_bitches = extract_judges(lines, show_name)
     info["judge_dogs"] = judge_dogs
     info["judge_bitches"] = judge_bitches
 
@@ -451,10 +466,10 @@ def parse_pdf_for_info(pdf_path: str, show_name:str) -> Optional[dict]:
         "Puppy", "Junior", "Yearling", "Special Beginners",
         "Undergraduate", "Tyro", "Novice", "Minor Puppy"
     ]
-    info["eligible_classes_found"] = any(cls.lower() in text_lower for cls in eligible_classes)
+    info["eligible_classes_found"] = any(cls.lower() in full_text for cls in eligible_classes)
 
     return info
-
+    
 def extract_show_type_from_schedule(text: str) -> str:
     text = text.lower()
     show_type_keywords = [
@@ -487,9 +502,8 @@ def extract_fee(pattern: str, text: str) -> Optional[float]:
 import re
 from typing import Tuple, Optional
 
-def extract_judges(text: str, show_name: str = "") -> Tuple[Optional[str], Optional[str]]:
-    # Split into lines for structured parsing
-    lines = text.splitlines()
+def extract_judges(lines: List[str], show_name: str = "") -> Tuple[Optional[str], Optional[str]]:
+    text = "\n".join(lines)
     text_lower = text.lower()
 
     is_single_breed = (
@@ -520,7 +534,7 @@ def extract_judges(text: str, show_name: str = "") -> Tuple[Optional[str], Optio
 
     judge_dogs = None
     judge_bitches = None
-    
+
     # === SINGLE BREED STRATEGY ===
     if is_single_breed:
         dog_match = re.search(r"(Dogs?:)\s*(.+)", text, flags=re.IGNORECASE)
@@ -605,13 +619,12 @@ def detect_overnight_pairs(
     results: List[dict],
     travel_cache: dict
 ) -> List[dict]:
-
-    #Detect overnight stay chains:
+    # Detect overnight stay chains:
     # Shows on consecutive days
     # Both >3h from home
     # Consecutive pairs within MAX_PAIR_GAP_MINUTES of each other
     # Allows multi-day chaining
-    
+
     overnights = []
     max_pair_gap_minutes = int(os.getenv("MAX_PAIR_GAP_MINUTES", "75"))
     max_shows = os.getenv("MAX_SHOWS")
@@ -641,12 +654,12 @@ def detect_overnight_pairs(
             ]
             found_next = False
             for show_b in next_day_shows:
-                venue_a = current_show['venue']
-                venue_b = show_b['venue']
-                if not venue_a or not venue_b:
-                    continue
+                origin_pc = current_show.get("postcode")
+                dest_pc = show_b.get("postcode")
+                if not origin_pc or not dest_pc:
+                    continue  # Require postcode for both shows
 
-                travel_ab = get_between_travel_info(venue_a, venue_b, travel_cache)
+                travel_ab = get_between_travel_info(origin_pc, dest_pc, travel_cache)
                 time_ab = travel_ab.get('drive_time_minutes', 9999)
                 if time_ab <= max_pair_gap_minutes:
                     chain.append(show_b)
@@ -672,7 +685,7 @@ def detect_overnight_pairs(
             })
 
     return overnights
-
+    
 def load_wins_log() -> list:
     #Load the wins log JSON file.
     #Returns an empty list if file not found or unreadable.
@@ -832,12 +845,14 @@ def parse_postal_close_date_from_html(html: str) -> Optional[datetime.date]:
 def run_golden_scrape():
     scrape_all_results(start_year=2007, output_csv="golden_results.csv")
     
-async def run_higham_links():
-    links = await fetch_higham_show_links()
-    with open(HIGHAM_LINKS_FILE, "w") as f:
-        for url, start, end, close in links:
-            f.write(f"{url}\t{start}\t{end}\t{close}\n")
-    print(f"[INFO] Saved {len(links)} Higham show links.")
+def run_higham_links():
+    async def _inner():
+        links = await fetch_higham_show_links()
+        with open(HIGHAM_LINKS_FILE, "w") as f:
+            for url, start, end, close in links:
+                f.write(f"{url}\t{start}\t{end}\t{close}\n")
+        print(f"[INFO] Saved {len(links)} Higham show links.")
+    asyncio.run(_inner())
         
 async def main_processing_loop(show_list: list):
     global processed_shows
@@ -860,10 +875,8 @@ async def main_processing_loop(show_list: list):
         schedule_pdf_path = f"schedule_{safe_id}.pdf"
         pdf_path, venue = download_schedule_via_post(show_url, schedule_pdf_path)
 
-        # --- Travel cache integration ---
-        if venue and venue not in travel_cache:
-            travel_cache[venue] = {}  # Placeholder for travel data
-            travel_updated = True
+        # === Extract postcode from venue ===
+        postcode = extract_postcode(venue) if venue else None
 
         if not pdf_path:
             print(f"Skipping {show.get('show_name')} (no schedule PDF)")
@@ -880,7 +893,7 @@ async def main_processing_loop(show_list: list):
             show["type"] = info["type"]
 
         # === Travel data ===
-        travel_info = get_travel_info(venue, travel_cache) if venue else {}
+        travel_info = get_travel_info(postcode, travel_cache) if postcode else {}
 
         result = {
             "show_url": show_url,
@@ -890,6 +903,7 @@ async def main_processing_loop(show_list: list):
             "judge_dogs": info.get("judge_dogs"),
             "judge_bitches": info.get("judge_bitches"),
             "venue": venue,
+            "postcode": postcode,
             "first_entry_fee": info.get("first_entry_fee"),
             "subsequent_entry_fee": info.get("subsequent_entry_fee"),
             "catalogue_fee": info.get("catalogue_price"),
@@ -907,9 +921,9 @@ async def main_processing_loop(show_list: list):
         if len(results) % 5 == 0:
             # Patch in missing drive time from cache before saving
             for r in results:
-                venue = r.get("venue")
-                if venue and "drive_time_minutes" not in r:
-                    cached = travel_cache.get(venue)
+                postcode = r.get("postcode")
+                if postcode and "drive_time_minutes" not in r:
+                    cached = travel_cache.get(postcode)
                     if cached and "duration_hours" in cached:
                         r["drive_time_minutes"] = round(cached["duration_hours"] * 60)
 
@@ -917,9 +931,9 @@ async def main_processing_loop(show_list: list):
 
     # Final patch before last save
     for r in results:
-        venue = r.get("venue")
-        if venue and "drive_time_minutes" not in r:
-            cached = travel_cache.get(venue)
+        postcode = r.get("postcode")
+        if postcode and "drive_time_minutes" not in r:
+            cached = travel_cache.get(postcode)
             if cached and "duration_hours" in cached:
                 r["drive_time_minutes"] = round(cached["duration_hours"] * 60)
 
@@ -929,7 +943,7 @@ async def main_processing_loop(show_list: list):
     upload_to_google_drive()
     print("Processing loop complete.")
     return results
-
+    
 async def full_run():
     run_golden_scrape()
     await run_higham_links()  # <-- Fix: Await the async function
